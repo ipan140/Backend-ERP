@@ -39,4 +39,13 @@ class Customer extends Model
     {
         return $q->where('is_active', true);
     }
+    public function orders()
+    {
+        return $this->hasMany(SalesOrder::class, 'customer_id');
+    }
+
+    public function invoices()
+    {
+        return $this->hasMany(Invoice::class, 'customer_id');
+    }
 }

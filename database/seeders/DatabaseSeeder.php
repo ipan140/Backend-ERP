@@ -32,7 +32,9 @@ class DatabaseSeeder extends Seeder
             QuotationItemSeeder::class,
             QuotationStatusLogSeeder::class,
             PaymentTermSeeder::class,   // ⬅️ tambahkan
-            PricelistSeeder::class
+            PricelistSeeder::class,
+            SalesSeeder::class,
+            InvoiceSeeder::class
         ]);
 
         // 4) Aktifkan lagi FK checks

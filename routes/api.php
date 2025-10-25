@@ -10,6 +10,10 @@ use App\Http\Controllers\Api\Quotation\QuotationCRUDController;
 use App\Http\Controllers\Api\Quotation\QuotationWorkflowController;
 use App\Http\Controllers\Api\Quotation\QuotationConvertController;
 
+// ⬇️ Tambahan: controller baru
+use App\Http\Controllers\Api\SalesOrderController;
+use App\Http\Controllers\Api\InvoiceController;
+
 /*
 |--------------------------------------------------------------------------
 | Public (no auth)
@@ -65,15 +69,18 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/{id}',  'update')->whereNumber('id')->name('update');
         });
 
-        // Workflow
+        // Workflow (gunakan istilah konsisten: send/confirm/lose/expire)
         Route::controller(QuotationWorkflowController::class)->group(function () {
-            Route::post('/{id}/send',    'send'   )->whereNumber('id')->name('send');
-            Route::post('/{id}/approve', 'approve')->whereNumber('id')->name('approve');
-            Route::post('/{id}/lose',    'lose'   )->whereNumber('id')->name('lose');
-            Route::post('/{id}/expire',  'expire' )->whereNumber('id')->name('expire');
+            Route::post('/{id}/send',     'send'    )->whereNumber('id')->name('send');
+            Route::post('/{id}/confirm',  'confirm' )->whereNumber('id')->name('confirm'); // ✅ konsisten
+            Route::post('/{id}/lose',     'lose'    )->whereNumber('id')->name('lose');
+            Route::post('/{id}/expire',   'expire'  )->whereNumber('id')->name('expire');
+
+            // alias lama (optional): approve -> confirm
+            Route::post('/{id}/approve',  'confirm' )->whereNumber('id')->name('approve');
         });
 
-        // Convert → Sales Order (stub)
+        // Convert → Sales Order
         Route::post('/{id}/convert', [QuotationConvertController::class, 'convert'])
             ->whereNumber('id')->name('convert');
     });
@@ -88,5 +95,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{id}',    [PricelistController::class, 'update'])->whereNumber('id')->name('update');
         Route::delete('/{id}', [PricelistController::class, 'destroy'])->whereNumber('id')->name('destroy');
     });
-    
+
+    // ========================
+    // Sales Orders
+    // ========================
+    Route::prefix('orders')->name('orders.')->group(function () {
+        Route::get('/',            [SalesOrderController::class, 'index'])->name('index');         // ?q=&status=&date_from=&date_to=&sort=
+        Route::get('/{id}',        [SalesOrderController::class, 'show'])->whereNumber('id')->name('show');
+        Route::post('/{id}/invoice',[SalesOrderController::class, 'makeInvoice'])->whereNumber('id')->name('makeInvoice');
+        Route::post('/{id}/deliver',[SalesOrderController::class, 'deliver'])->whereNumber('id')->name('deliver'); // optional: integrasi inventory
+    });
+
+    // ========================
+    // Invoices
+    // ========================
+    Route::prefix('invoices')->name('invoices.')->group(function () {
+        Route::get('/',        [InvoiceController::class, 'index'])->name('index');     // ?q=&status=&date_from=&date_to=&sort=
+        Route::get('/{id}',    [InvoiceController::class, 'show'])->whereNumber('id')->name('show');
+        Route::post('/{id}/post', [InvoiceController::class, 'post'])->whereNumber('id')->name('post');
+        Route::post('/{id}/pay',  [InvoiceController::class, 'pay'])->whereNumber('id')->name('pay');
+    });
 });
