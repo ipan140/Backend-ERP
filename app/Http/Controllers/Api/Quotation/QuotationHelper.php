@@ -8,15 +8,11 @@ trait QuotationHelper
 {
     /**
      * Auto-number: QO-YYYYMM-XXXX
-     * - Lock baris terkait supaya aman di concurrent request.
-     * - Ambil nomor terakhir berdasar prefix bulan berjalan, lalu +1.
-     * - Pastikan ada UNIQUE index di kolom `quotations.number`.
      */
     protected function nextNumber(): string
     {
         $prefix = 'QO-'.now()->format('Ym').'-';
 
-        // Kunci rows dengan prefix ini biar tidak balapan
         $last = DB::table('quotations')
             ->where('number', 'like', $prefix.'%')
             ->lockForUpdate()
@@ -33,33 +29,29 @@ trait QuotationHelper
     }
 
     /**
-     * Insert 1 item baris.
-     * Menerima key `qty` ATAU `quantity`.
+     * Insert 1 item baris (menerima key qty/quantity).
      */
     protected function insertItem(int $quotationId, array $row): void
     {
-        // normalisasi field
         $qty  = $row['qty'] ?? ($row['quantity'] ?? null);
         $uom  = $row['uom'] ?? 'pcs';
         $unit = $row['unit_price'] ?? null;
         $disc = $row['discount_pct'] ?? 0;
 
-        // casting & guard
         $qty  = (float) $qty;
         $unit = (float) $unit;
         $disc = (float) $disc;
 
-        if ($qty <= 0)   abort(422, 'Qty harus lebih dari 0.');
-        if ($unit < 0)   abort(422, 'Unit price tidak boleh negatif.');
-        if ($disc < 0 || $disc > 50) abort(422, 'Diskon item harus 0–50%.');
+        if ($qty <= 0)            abort(422, 'Qty harus lebih dari 0.');
+        if ($unit < 0)            abort(422, 'Unit price tidak boleh negatif.');
+        if ($disc < 0 || $disc>50)abort(422, 'Diskon item harus 0–50%.');
 
-        // hitung line total
         $line = ($qty * $unit) * (1 - $disc / 100);
         $line = round($line, 2);
 
         DB::table('quotation_items')->insert([
             'quotation_id' => $quotationId,
-            'product_id'   => $row['product_id'],
+            'product_id'   => $row['product_id'] ?? null,
             'description'  => $row['description'] ?? null,
             'qty'          => $qty,
             'uom'          => $uom,
@@ -73,7 +65,6 @@ trait QuotationHelper
 
     /**
      * Hitung ulang subtotal / tax / total dari items.
-     * Kalau nanti kamu punya diskon header, isi di $headerDiscount.
      */
     protected function recalcTotals(int $quotationId, float $headerDiscount = 0.0): void
     {
@@ -84,10 +75,9 @@ trait QuotationHelper
         $headerDiscount = max(0.0, $headerDiscount);
         $dpp = max(0.0, $subtotal - $headerDiscount);
 
-        // contoh PPN 11% — bisa dipindah ke config('tax.ppn', 0.11)
-        $ppnRate = 0.11;
-        $tax     = round($dpp * $ppnRate, 2);
-        $total   = round($dpp + $tax, 2);
+        $ppnRate = 0.11; // contoh PPN 11%
+        $tax   = round($dpp * $ppnRate, 2);
+        $total = round($dpp + $tax, 2);
 
         DB::table('quotations')->where('id', $quotationId)->update([
             'subtotal'        => round($subtotal, 2),
@@ -98,7 +88,7 @@ trait QuotationHelper
         ]);
     }
 
-    /** Merge JSON field "extra" dengan aman (unicode tidak di-escape) */
+    /** Merge JSON field "extra" dengan aman */
     protected function mergeExtra($currentJson, array $append): string
     {
         $curr = [];
@@ -108,15 +98,22 @@ trait QuotationHelper
         return json_encode(array_merge($curr, $append), JSON_UNESCAPED_UNICODE);
     }
 
-    /** Simpan status log */
-    protected function logStatus(int $quotationId, ?string $from, string $to, ?string $reason, ?int $userId): void
-    {
+    /**
+     * Simpan status log (COCOK dengan kolom tabel: note & user_id).
+     */
+    protected function logStatus(
+        int $quotationId,
+        ?string $from,
+        string $to,
+        ?string $note = null,
+        ?int $userId = null
+    ): void {
         DB::table('quotation_status_logs')->insert([
             'quotation_id' => $quotationId,
             'from_status'  => $from,
             'to_status'    => $to,
-            'changed_by'   => $userId,
-            'reason'       => $reason,
+            'note'         => $note,        // <- gunakan 'note', bukan 'reason'
+            'user_id'      => $userId,      // <- gunakan 'user_id', bukan 'changed_by'
             'created_at'   => now(),
             'updated_at'   => now(),
         ]);
