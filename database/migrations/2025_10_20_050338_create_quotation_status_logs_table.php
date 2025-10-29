@@ -15,27 +15,28 @@ return new class extends Migration
             $table->id();
 
             // Relasi ke quotations (header penawaran)
-            $table->unsignedBigInteger('quotation_id');
-            $table->foreign('quotation_id')
-                  ->references('id')
-                  ->on('quotations')
+            $table->foreignId('quotation_id')
+                  ->constrained('quotations')
                   ->onDelete('cascade');
 
             // Status sebelum dan sesudah
             $table->enum('from_status', ['draft', 'sent', 'won', 'lost', 'expired'])->nullable();
             $table->enum('to_status', ['draft', 'sent', 'won', 'lost', 'expired']);
 
-            // Siapa yang mengubah (user ID dari tabel users) - bisa null (jika auto expired oleh sistem)
-            $table->unsignedBigInteger('changed_by')->nullable();
-            $table->foreign('changed_by')
-                  ->references('id')
-                  ->on('users')
+            // Siapa yang mengubah (user ID dari tabel users)
+            $table->foreignId('changed_by')
+                  ->nullable()
+                  ->constrained('users')
                   ->nullOnDelete();
 
-            // Alasan atau catatan perubahan status
+            // Waktu perubahan (opsional, tapi controller kamu pakai ini)
+            $table->timestamp('changed_at')->nullable();
+
+            // Catatan / alasan perubahan status
             $table->text('reason')->nullable();
 
-            $table->timestamps(); // created_at = waktu perubahan status
+            // created_at = waktu log dibuat, updated_at = waktu edit log (jarang dipakai)
+            $table->timestamps();
         });
     }
 
