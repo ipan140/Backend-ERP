@@ -4,40 +4,77 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use App\Models\User;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1) User untuk login (email & password pasti)
-        User::query()->updateOrCreate(
-            ['email' => 'test@example.com'],
-            [
-                'name'              => 'Test User',
-                'password'          => Hash::make('password'), // <- login pakai 'password'
-                'email_verified_at' => now(),
-            ]
-        );
+        // 0) Seed user dulu (admin, hr, dll) — password 12345678 (plain) sesuai UserSeeder kamu
+        $this->call(UserSeeder::class);
 
-        // 2) (Opsional) matikan FK checks saat seeding awal
+        // Jika production, skip reset destruktif
+        if (app()->environment('production')) {
+            $this->command?->warn('⚠️ Production environment: skip reset data. Hanya menjalankan seeders dasar.');
+
+            // Jalankan seeders dasar yang aman (tanpa reset)
+            $this->call([
+                DepartmentSeeder::class,
+                JobPositionSeeder::class,
+                EmployeeSeeder::class,
+                ShiftSeeder::class,
+                PublicHolidaySeeder::class,
+                LeaveTypeSeeder::class,
+                SalaryRuleSeeder::class,
+                // Tambahkan lainnya bila perlu untuk prod
+            ]);
+
+            return;
+        }
+
+        // Dev / staging: reset & isi dummy lengkap
+        // OFF FK global (pengaman tambahan; di reset seeder juga sudah aman)
         try { DB::statement('SET FOREIGN_KEY_CHECKS=0'); } catch (\Throwable $e) {}
 
-        // 3) Jalankan seeders berurutan (hindari FK error)
+        // 1) RESET per modul (anak → induk)
+        $this->call([
+            ResetHRDataSeeder::class,
+            ResetSalesDataSeeder::class,
+        ]);
+
+        // 2) SEED HR (urutan aman)
+        $this->call([
+            DepartmentSeeder::class,
+            JobPositionSeeder::class,
+            EmployeeSeeder::class,
+            ContractSeeder::class,
+
+            ShiftSeeder::class,
+            AttendanceSeeder::class,
+            PublicHolidaySeeder::class,
+
+            LeaveTypeSeeder::class,
+            LeaveAllocationSeeder::class,
+            LeaveSeeder::class,
+
+            SalaryRuleSeeder::class,
+            SalaryStructureSeeder::class,
+            PayslipSeeder::class,
+        ]);
+
+        // 3) SEED Sales/ERP
         $this->call([
             CustomerSeeder::class,
             ProductSeeder::class,
             QuotationSeeder::class,
             QuotationItemSeeder::class,
             QuotationStatusLogSeeder::class,
-            PaymentTermSeeder::class,   // ⬅️ tambahkan
+            PaymentTermSeeder::class,
             PricelistSeeder::class,
             SalesSeeder::class,
-            InvoiceSeeder::class
+            InvoiceSeeder::class,
         ]);
 
-        // 4) Aktifkan lagi FK checks
+        // ON FK lagi
         try { DB::statement('SET FOREIGN_KEY_CHECKS=1'); } catch (\Throwable $e) {}
     }
 }
