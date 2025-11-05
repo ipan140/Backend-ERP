@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\Quotation;
+namespace App\Http\Controllers\Api\Sales\Quotation;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;

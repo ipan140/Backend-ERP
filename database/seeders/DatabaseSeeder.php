@@ -9,14 +9,12 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 0) Seed user dulu (admin, hr, dll) — password 12345678 (plain) sesuai UserSeeder kamu
+        // 0) USER SEEDER
         $this->call(UserSeeder::class);
 
-        // Jika production, skip reset destruktif
         if (app()->environment('production')) {
-            $this->command?->warn('⚠️ Production environment: skip reset data. Hanya menjalankan seeders dasar.');
+            $this->command?->warn('⚠️ Production environment: skip destructive resets.');
 
-            // Jalankan seeders dasar yang aman (tanpa reset)
             $this->call([
                 DepartmentSeeder::class,
                 JobPositionSeeder::class,
@@ -25,43 +23,43 @@ class DatabaseSeeder extends Seeder
                 PublicHolidaySeeder::class,
                 LeaveTypeSeeder::class,
                 SalaryRuleSeeder::class,
-                // Tambahkan lainnya bila perlu untuk prod
             ]);
-
             return;
         }
 
-        // Dev / staging: reset & isi dummy lengkap
-        // OFF FK global (pengaman tambahan; di reset seeder juga sudah aman)
+        // Disable FK sementara
         try { DB::statement('SET FOREIGN_KEY_CHECKS=0'); } catch (\Throwable $e) {}
 
-        // 1) RESET per modul (anak → induk)
+        /* ==============================================================
+         |  RESET SEEDERS
+         ============================================================== */
         $this->call([
             ResetHRDataSeeder::class,
             ResetSalesDataSeeder::class,
         ]);
 
-        // 2) SEED HR (urutan aman)
+        /* ==============================================================
+         |  HR MODULE
+         ============================================================== */
         $this->call([
             DepartmentSeeder::class,
             JobPositionSeeder::class,
             EmployeeSeeder::class,
             ContractSeeder::class,
-
             ShiftSeeder::class,
             AttendanceSeeder::class,
             PublicHolidaySeeder::class,
-
             LeaveTypeSeeder::class,
             LeaveAllocationSeeder::class,
             LeaveSeeder::class,
-
             SalaryRuleSeeder::class,
             SalaryStructureSeeder::class,
             PayslipSeeder::class,
         ]);
 
-        // 3) SEED Sales/ERP
+        /* ==============================================================
+         |  SALES / ERP MODULE
+         ============================================================== */
         $this->call([
             CustomerSeeder::class,
             ProductSeeder::class,
@@ -74,7 +72,41 @@ class DatabaseSeeder extends Seeder
             InvoiceSeeder::class,
         ]);
 
-        // ON FK lagi
+        /* ==============================================================
+         |  SUPPLY CHAIN MANAGEMENT (SCM) MODULE
+         ============================================================== */
+        $this->call([
+            VendorSeeder::class,
+            ItemSeeder::class,
+            WarehouseSeeder::class,
+            StockLevelSeeder::class,
+            StockMoveSeeder::class,
+
+            // Purchase
+            PurchaseSeeder::class,
+            PurchaseItemSeeder::class,
+
+            // Shipment & Quality
+            ShipmentSeeder::class,
+            ShipmentItemSeeder::class,
+            QualityInspectionSeeder::class,
+            QualityInspectionItemSeeder::class,
+
+            // Replenishment
+            ReplenishmentSeeder::class,
+
+            // Maintenance / Asset
+            AssetSeeder::class,
+            WorkOrderSeeder::class,
+
+            // Processing / Manufacturing
+            ProcessingOrderSeeder::class,
+            ProcessingOrderItemSeeder::class,
+        ]);
+
+        // Enable FK lagi
         try { DB::statement('SET FOREIGN_KEY_CHECKS=1'); } catch (\Throwable $e) {}
+
+        $this->command?->info('✅ Database seeding completed successfully!');
     }
 }

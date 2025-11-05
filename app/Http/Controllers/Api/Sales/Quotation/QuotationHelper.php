@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Api\Quotation;
+namespace App\Http\Controllers\Api\Sales\Quotation;
 
 use Illuminate\Support\Facades\DB;
 
