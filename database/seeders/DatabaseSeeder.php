@@ -9,13 +9,19 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 0) USER SEEDER
+        /* ============================================================== 
+         |  0) USER / BASE SEEDER 
+         ============================================================== */
         $this->call(UserSeeder::class);
 
+        /* ============================================================== 
+         |  PRODUCTION MODE (skip resets)
+         ============================================================== */
         if (app()->environment('production')) {
             $this->command?->warn('⚠️ Production environment: skip destructive resets.');
 
             $this->call([
+                // HR (aman di production)
                 DepartmentSeeder::class,
                 JobPositionSeeder::class,
                 EmployeeSeeder::class,
@@ -23,23 +29,33 @@ class DatabaseSeeder extends Seeder
                 PublicHolidaySeeder::class,
                 LeaveTypeSeeder::class,
                 SalaryRuleSeeder::class,
+
+                // ✅ Accounting (dipanggil satu-per-satu)
+                CompanySeeder::class,
+                AccountJournalSeeder::class,
+                AccountSeeder::class,
+                JournalSequenceSeeder::class,
+                DemoMovesSeeder::class,
             ]);
             return;
         }
 
-        // Disable FK sementara
+        /* ============================================================== 
+         |  Disable foreign key temporarily 
+         ============================================================== */
         try { DB::statement('SET FOREIGN_KEY_CHECKS=0'); } catch (\Throwable $e) {}
 
-        /* ==============================================================
-         |  RESET SEEDERS
+        /* ============================================================== 
+         |  RESET SEEDERS 
          ============================================================== */
         $this->call([
             ResetHRDataSeeder::class,
             ResetSalesDataSeeder::class,
+            // ResetAccountingSeeder::class, // (opsional) tambahkan bila sudah ada
         ]);
 
-        /* ==============================================================
-         |  HR MODULE
+        /* ============================================================== 
+         |  HR MODULE 
          ============================================================== */
         $this->call([
             DepartmentSeeder::class,
@@ -57,8 +73,8 @@ class DatabaseSeeder extends Seeder
             PayslipSeeder::class,
         ]);
 
-        /* ==============================================================
-         |  SALES / ERP MODULE
+        /* ============================================================== 
+         |  SALES / ERP MODULE 
          ============================================================== */
         $this->call([
             CustomerSeeder::class,
@@ -72,8 +88,8 @@ class DatabaseSeeder extends Seeder
             InvoiceSeeder::class,
         ]);
 
-        /* ==============================================================
-         |  SUPPLY CHAIN MANAGEMENT (SCM) MODULE
+        /* ============================================================== 
+         |  SUPPLY CHAIN MANAGEMENT (SCM) MODULE 
          ============================================================== */
         $this->call([
             VendorSeeder::class,
@@ -104,9 +120,22 @@ class DatabaseSeeder extends Seeder
             ProcessingOrderItemSeeder::class,
         ]);
 
-        // Enable FK lagi
+        /* ============================================================== 
+         |  ACCOUNTING MODULE (💰 Opsi B: panggil satu-per-satu)
+         ============================================================== */
+        $this->call([
+            CompanySeeder::class,
+            AccountJournalSeeder::class,
+            AccountSeeder::class,
+            JournalSequenceSeeder::class,
+            DemoMovesSeeder::class,
+        ]);
+
+        /* ============================================================== 
+         |  Re-enable foreign key checks 
+         ============================================================== */
         try { DB::statement('SET FOREIGN_KEY_CHECKS=1'); } catch (\Throwable $e) {}
 
-        $this->command?->info('✅ Database seeding completed successfully!');
+        $this->command?->info('✅ Database seeding completed successfully (HR + Sales + SCM + Accounting)!');
     }
 }
