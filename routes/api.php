@@ -25,7 +25,7 @@ use App\Http\Controllers\Api\SCM\ProcessingController;
 use App\Http\Controllers\Api\SCM\PurchaseController;
 use App\Http\Controllers\Api\SCM\QualityController;
 use App\Http\Controllers\Api\SCM\ReplenishmentController;
-use App\Http\Controllers\Api\SCM\ReportController;
+use App\Http\Controllers\Api\SCM\ReportController as ScmReportController;
 use App\Http\Controllers\Api\SCM\VendorController;
 
 /* ===== HR ===== */
@@ -60,7 +60,7 @@ Route::post('/login',    [AuthController::class, 'login'])->name('auth.login');
 */
 Route::middleware('auth:sanctum')->group(function () {
 
-    // auth utils
+    // Auth utils
     Route::get('/profile', [AuthController::class, 'profile'])->name('auth.profile');
     Route::post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
 
@@ -104,7 +104,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::match(['put','patch'], '{id}', 'update')->whereNumber('id')->name('update');
             });
 
-            // workflow
+            // Workflow
             Route::controller(QuotationWorkflowController::class)->group(function () {
                 Route::post('{id}/send',    'send')->whereNumber('id')->name('send');
                 Route::post('{id}/approve', 'approve')->whereNumber('id')->name('approve');
@@ -112,11 +112,11 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::post('{id}/expire',  'expire')->whereNumber('id')->name('expire');
             });
 
-            // convert
+            // Convert
             Route::post('{id}/convert', [QuotationConvertController::class, 'convert'])
                 ->whereNumber('id')->name('convert');
 
-            // alias items & logs per quotation
+            // Items & logs per quotation
             Route::get('{id}/items', [QuotationItemController::class, 'byQuotation'])
                 ->whereNumber('id')->name('items.by-quotation');
 
@@ -145,7 +145,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::prefix('orders')->as('orders.')->group(function () {
             Route::get('/',                 [SalesOrderController::class, 'index'])->name('index');
             Route::get('{id}',              [SalesOrderController::class, 'show'])->whereNumber('id')->name('show');
-            Route::post('/',                [SalesOrderController::class, 'store'])->name('store'); // optional
+            Route::post('/',                [SalesOrderController::class, 'store'])->name('store');
             Route::match(['put','patch'], '{id}', [SalesOrderController::class, 'update'])->whereNumber('id')->name('update');
             Route::delete('{id}',           [SalesOrderController::class, 'destroy'])->whereNumber('id')->name('destroy');
 
@@ -155,8 +155,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         /* ---- Invoices ---- */
         Route::prefix('invoices')->as('invoices.')->group(function () {
-            Route::get('/',        [InvoiceController::class, 'index'])->name('index');
-            Route::get('{id}',     [InvoiceController::class, 'show'])->whereNumber('id')->name('show');
+            Route::get('/',          [InvoiceController::class, 'index'])->name('index');
+            Route::get('{id}',       [InvoiceController::class, 'show'])->whereNumber('id')->name('show');
             Route::post('{id}/post', [InvoiceController::class, 'post'])->whereNumber('id')->name('post');
             Route::post('{id}/pay',  [InvoiceController::class, 'pay'])->whereNumber('id')->name('pay');
         });
@@ -164,16 +164,78 @@ Route::middleware('auth:sanctum')->group(function () {
 
     /* ==================== SCM ==================== */
     Route::prefix('scm')->as('scm.')->group(function () {
-        Route::apiResource('inventory',      InventoryController::class);
-        Route::apiResource('logistics',      LogisticsController::class);
-        Route::apiResource('maintenance',    MaintenanceController::class);
-        Route::apiResource('processing',     ProcessingController::class);
-        Route::apiResource('purchases',      PurchaseController::class);
-        Route::apiResource('quality',        QualityController::class);
+
+        /* ---- Inventory custom endpoints (letakkan SEBELUM resource) ---- */
+        Route::prefix('inventory')->as('inventory.')->group(function () {
+            // Read
+            Route::get('stocks',        [InventoryController::class, 'stocks'])->name('stocks');
+            Route::get('lots',          [InventoryController::class, 'lots'])->name('lots');
+            Route::get('expiry-alerts', [InventoryController::class, 'expiryAlerts'])->name('expiry-alerts');
+
+            // Create / Actions
+            Route::post('lots',     [InventoryController::class, 'storeLot'])->name('lots.store');
+            Route::post('receipt',  [InventoryController::class, 'receipt'])->name('receipt');
+            Route::post('transfer', [InventoryController::class, 'transfer'])->name('transfer');
+            Route::post('adjust',   [InventoryController::class, 'adjust'])->name('adjust');
+        });
+
+        // Hindari konflik 'lots' dkk → buang 'show'
+        Route::apiResource('inventory', InventoryController::class)->except(['show']);
+
+        /* ---- Logistics ---- */
+        Route::apiResource('logistics', LogisticsController::class);
+        Route::post('logistics/{id}/confirm', [LogisticsController::class, 'confirm'])
+            ->whereNumber('id')->name('logistics.confirm');
+        Route::post('logistics/{id}/pod',     [LogisticsController::class, 'proofOfDelivery'])
+            ->whereNumber('id')->name('logistics.pod');
+
+        /* ---- Purchases ---- */
+        // Aksi khusus dulu supaya tidak ditangkap sebagai {purchase} milik resource
+        Route::post('purchases/{id}/confirm', [PurchaseController::class, 'confirm'])
+            ->whereNumber('id')->name('purchases.confirm');
+        Route::post('purchases/{id}/receive', [PurchaseController::class, 'receive'])
+            ->whereNumber('id')->name('purchases.receive');
+        Route::apiResource('purchases', PurchaseController::class);
+
+        /* ---- Replenishments ---- */
+        // Actions FIRST
+        Route::post('replenishments/check',         [ReplenishmentController::class, 'check'])->name('replenishments.check');
+        Route::post('replenishments/auto-generate', [ReplenishmentController::class, 'autoGenerate'])->name('replenishments.auto-generate');
         Route::apiResource('replenishments', ReplenishmentController::class);
-        Route::apiResource('vendors',        VendorController::class);
-        // Reports (read-only)
-        Route::apiResource('reports', ReportController::class)->only(['index','show']);
+
+        /* ---- Vendors ---- */
+        Route::post('vendors/rating', [VendorController::class, 'rating'])->name('vendors.rating');
+        Route::apiResource('vendors', VendorController::class);
+
+        /* ---- Maintenance (custom endpoints) ---- */
+        Route::prefix('maintenance')->as('maintenance.')->group(function () {
+            Route::get('equipments',      [MaintenanceController::class, 'equipments'])->name('equipments');
+            Route::post('equipments',     [MaintenanceController::class, 'storeEquipment'])->name('equipments.store');
+            Route::get('plans',           [MaintenanceController::class, 'plans'])->name('plans');
+            Route::post('request',        [MaintenanceController::class, 'request'])->name('request');
+            Route::post('complete/{id}',  [MaintenanceController::class, 'complete'])->whereNumber('id')->name('complete');
+        });
+
+        /* ---- Processing (Work Orders - custom endpoints) ---- */
+        Route::prefix('processing')->as('processing.')->group(function () {
+            Route::get('workorders',               [ProcessingController::class, 'index'])->name('workorders.index');
+            Route::get('workorders/{id}',          [ProcessingController::class, 'show'])->whereNumber('id')->name('workorders.show');
+            Route::post('workorders',              [ProcessingController::class, 'store'])->name('workorders.store');
+            Route::post('workorders/{id}/start',   [ProcessingController::class, 'start'])->whereNumber('id')->name('workorders.start');
+            Route::post('workorders/{id}/finish',  [ProcessingController::class, 'finish'])->whereNumber('id')->name('workorders.finish');
+        });
+
+        /* ---- Quality (custom endpoints) ---- */
+        Route::prefix('quality')->as('quality.')->group(function () {
+            Route::get('checkpoints',        [QualityController::class, 'checkpoints'])->name('checkpoints');
+            Route::get('checks',             [QualityController::class, 'index'])->name('checks.index');
+            Route::post('checks',            [QualityController::class, 'store'])->name('checks.store');
+            Route::post('nonconformance',    [QualityController::class, 'nonconformance'])->name('nonconformance.store');
+            Route::get('reports',            [QualityController::class, 'reports'])->name('reports');
+        });
+
+        /* ---- Reports (read-only) ---- */
+        Route::apiResource('reports', ScmReportController::class)->only(['index','show']);
     });
 
     /* ==================== HR (Core + Payroll) ==================== */
@@ -221,4 +283,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payslips/{id}/post', [PayslipController::class, 'post'])->whereNumber('id')->name('payslips.post');
         Route::post('payslips/{id}/pay',  [PayslipController::class, 'pay'])->whereNumber('id')->name('payslips.pay');
     });
+
+    /* ==================== ACCOUNTING (GL) ==================== */
+    // Route::prefix('accounting')->as('accounting.')->group(function () {
+
+    //     // Master Data
+    //     Route::apiResource('accounts', AccAccountController::class);   // Chart of Accounts
+    //     Route::apiResource('journals', AccJournalController::class);   // Journals (Bank/Cash/Sales/General)
+
+    //     // Journal Entries (Moves)
+    //     Route::apiResource('moves', AccMoveController::class);         // draft CRUD
+
+    //     // Posting / Unposting
+    //     Route::post('moves/{move}/post',   [AccMovePostController::class, 'post'])
+    //         ->whereNumber('move')->name('moves.post');
+    //     Route::post('moves/{move}/unpost', [AccMovePostController::class, 'unpost'])
+    //         ->whereNumber('move')->name('moves.unpost');
+
+    //     // Reports
+    //     Route::get('reports/trial-balance',  [AccReportController::class, 'trialBalance'])
+    //         ->name('reports.trial-balance');
+    //     Route::get('reports/general-ledger', [AccReportController::class, 'generalLedger'])
+    //         ->name('reports.general-ledger');
+    // });
 });
