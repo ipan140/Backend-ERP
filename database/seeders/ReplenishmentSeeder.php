@@ -3,41 +3,28 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use App\Models\Replenishment;
-use App\Models\Item;
 use App\Models\Warehouse;
+use App\Models\Item;
+use App\Models\Replenishment;
 
 class ReplenishmentSeeder extends Seeder
 {
     public function run(): void
     {
-        if (Item::count() === 0 || Warehouse::count() === 0) return;
-        if (Replenishment::count() > 0) return;
-
-        $i1 = Item::inRandomOrder()->first();
-        $i2 = Item::inRandomOrder()->where('id','!=',$i1->id)->first();
-        $wh = Warehouse::inRandomOrder()->first();
+        $wh = Warehouse::where('code','WH-MAIN')->first();
+        if (!$wh) return;
 
         $rows = [
-            [
-                'item_id'      => $i1->id,
-                'warehouse_id' => $wh->id,
-                'method'       => 'minmax',
-                'min_qty'      => 20,
-                'max_qty'      => 100,
-                'reorder_qty'  => 40,
-                'status'       => 'active',
-            ],
-            [
-                'item_id'      => $i2->id,
-                'warehouse_id' => $wh->id,
-                'method'       => 'minmax',
-                'min_qty'      => 10,
-                'max_qty'      => 60,
-                'reorder_qty'  => 30,
-                'status'       => 'active',
-            ],
+            ['sku' => 'ITM-UREA', 'min' => 500, 'max' => 1500, 'reorder' => 1000],
+            ['sku' => 'ITM-NPK',  'min' => 300, 'max' => 1200, 'reorder' => 800],
         ];
-        foreach ($rows as $r) Replenishment::create($r);
+        foreach ($rows as $r) {
+            $item = Item::where('sku',$r['sku'])->first();
+            if (!$item) continue;
+            Replenishment::updateOrCreate(
+                ['item_id' => $item->id, 'warehouse_id' => $wh->id],
+                ['min_qty' => $r['min'], 'max_qty' => $r['max'], 'reorder_qty' => $r['reorder'], 'active' => true]
+            );
+        }
     }
 }

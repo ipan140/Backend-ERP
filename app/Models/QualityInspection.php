@@ -2,18 +2,29 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class QualityInspection extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['number', 'shipment_id', 'inspection_date', 'inspector_name', 'status'];
+    protected $fillable = [
+        'lot_id','item_id','point','result','metrics','note','photo_url',
+    ];
 
-    public function shipment()
+    protected $casts = [
+        'metrics' => 'array',
+    ];
+
+    public function lot()
     {
-        return $this->belongsTo(Shipment::class);
+        return $this->belongsTo(Lot::class);
+    }
+
+    public function item()
+    {
+        return $this->belongsTo(Item::class);
     }
 
     public function items()

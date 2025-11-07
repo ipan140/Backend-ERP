@@ -2,18 +2,25 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Shipment extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['number', 'vendor_id', 'date', 'status'];
+    protected $fillable = [
+        'number','direction','warehouse_id','partner_id','partner_type',
+        'status','scheduled_date','carrier','route', // kalau kolom ini ada
+    ];
 
-    public function vendor()
+    protected $casts = [
+        'scheduled_date' => 'date',
+    ];
+
+    public function warehouse()
     {
-        return $this->belongsTo(Vendor::class);
+        return $this->belongsTo(Warehouse::class);
     }
 
     public function items()
@@ -21,8 +28,32 @@ class Shipment extends Model
         return $this->hasMany(ShipmentItem::class);
     }
 
-    public function qualityInspections()
+    // ✅ Tambahkan relasi vendor dan customer berbasis partner_type
+    public function vendor()
     {
-        return $this->hasMany(QualityInspection::class);
+        return $this->belongsTo(Vendor::class, 'partner_id')
+                    ->where('partner_type', 'vendor');
+    }
+
+    public function customer()
+    {
+        return $this->belongsTo(Customer::class, 'partner_id')
+                    ->where('partner_type', 'customer');
+    }
+
+    // (opsional) helper untuk ambil partner generik
+    public function getPartnerNameAttribute(): ?string
+    {
+        if ($this->partner_type === 'vendor') {
+            return $this->relationLoaded('vendor')
+                ? optional($this->vendor)->name
+                : optional($this->vendor()->first())->name;
+        }
+        if ($this->partner_type === 'customer') {
+            return $this->relationLoaded('customer')
+                ? optional($this->customer)->name
+                : optional($this->customer()->first())->name;
+        }
+        return null;
     }
 }

@@ -4,119 +4,110 @@ namespace App\Http\Controllers\Api\SCM;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\{Equipment, MaintenanceRequest};
 
 class MaintenanceController extends Controller
 {
-    public function equipments()
-    {
-        // Dummy list agar UI ada data saat awal
-        $equipments = [
-            ['id' => 1, 'name' => 'Pump A', 'serial' => 'PMP-001', 'category' => 'Pump'],
-            ['id' => 2, 'name' => 'Valve B', 'serial' => 'VLV-221', 'category' => 'Valve'],
-        ];
+    /* =========================
+     * EQUIPMENTS
+     * ========================= */
 
-        return response()->json([
-            'ok'   => true,
-            'data' => $equipments,
-        ]);
+    // List equipments (support search & paginate ringan)
+    public function equipments(Request $r)
+    {
+        $q = Equipment::query()
+            ->when($r->filled('search'), function ($qq) use ($r) {
+                $s = "%{$r->search}%";
+                $qq->where(function ($w) use ($s) {
+                    $w->where('name', 'like', $s)
+                      ->orWhere('code', 'like', $s)
+                      ->orWhere('serial', 'like', $s)
+                      ->orWhere('category', 'like', $s);
+                });
+            })
+            ->orderBy('name');
+
+        $perPage = (int) $r->get('per_page', 20);
+        $rows    = $q->paginate($perPage);
+
+        return response()->json(['ok' => true, 'data' => $rows]);
     }
 
+    // Create equipment
     public function storeEquipment(Request $r)
     {
         $data = $r->validate([
             'name'     => 'required|string|max:200',
+            'code'     => 'required|string|max:100|unique:equipments,code',
             'serial'   => 'nullable|string|max:200',
             'category' => 'nullable|string|max:200',
+            'asset_id' => 'nullable|integer|exists:assets,id',
+            'active'   => 'nullable|boolean',
         ]);
 
-        // Dummy id = 999 biar kelihatan dari UI
-        return response()->json([
-            'ok'        => true,
-            'message'   => 'Equipment saved (dummy)',
-            'equipment' => array_merge(['id' => 999], $data),
-        ], 201);
+        $eq = Equipment::create($data + ['active' => $data['active'] ?? true]);
+
+        return response()->json(['ok' => true, 'equipment' => $eq], 201);
     }
 
+    /* =========================
+     * PREVENTIVE PLANS (optional)
+     * ========================= */
     public function plans()
     {
-        // Dummy preventive plans
-        $plans = [
-            [
-                'id' => 11,
-                'equipment_id' => 1,
-                'equipment_name' => 'Pump A',
-                'frequency' => 'monthly',
-                'next_date' => now()->addDays(10)->toDateString(),
-            ],
-            [
-                'id' => 12,
-                'equipment_id' => 2,
-                'equipment_name' => 'Valve B',
-                'frequency' => 'quarterly',
-                'next_date' => now()->addDays(25)->toDateString(),
-            ],
-        ];
-
-        return response()->json([
-            'ok'    => true,
-            'plans' => $plans,
-        ]);
+        // Bila belum ada tabel/Model MaintenancePlan, kirim array kosong agar FE aman.
+        // return response()->json(['ok'=>true,'plans'=>MaintenancePlan::with('equipment')->latest()->paginate(20)]);
+        return response()->json(['ok' => true, 'plans' => []]);
     }
 
-    // NEW: list maintenance requests (dummy)
-    public function requests()
+    /* =========================
+     * MAINTENANCE REQUESTS
+     * ========================= */
+
+    // List requests
+    public function index(Request $r)
     {
-        $requests = [
-            [
-                'id' => 101,
-                'equipment_id' => 1,
-                'equipment_name' => 'Pump A',
-                'type' => 'corrective',
-                'note' => 'Leak detected',
-                'status' => 'open',
-                'created_at' => now()->subDay()->toDateTimeString(),
-            ],
-            [
-                'id' => 102,
-                'equipment_id' => 2,
-                'equipment_name' => 'Valve B',
-                'type' => 'preventive',
-                'note' => 'Scheduled lube',
-                'status' => 'done',
-                'created_at' => now()->subDays(2)->toDateTimeString(),
-            ],
-        ];
+        $q = MaintenanceRequest::with('equipment')
+            ->when($r->filled('status'), fn($qq) => $qq->where('status', $r->status))
+            ->when($r->filled('type'),   fn($qq) => $qq->where('type', $r->type))
+            ->orderByDesc('id');
+
+        $perPage = (int) $r->get('per_page', 15);
 
         return response()->json([
             'ok'       => true,
-            'requests' => $requests,
+            'requests' => $q->paginate($perPage),
         ]);
     }
 
+    // Create request (corrective / preventive)
     public function request(Request $r)
     {
         $data = $r->validate([
-            'equipment_id' => 'required|integer',
+            'equipment_id' => 'required|integer|exists:equipments,id',
             'type'         => 'required|string|in:corrective,preventive',
             'note'         => 'nullable|string',
+            'priority'     => 'nullable|in:low,normal,high',
         ]);
 
-        return response()->json([
-            'ok'      => true,
-            'message' => 'Maintenance request created (dummy)',
-            'request' => array_merge([
-                'id' => 888,
-                'status' => 'open',
-                'created_at' => now()->toDateTimeString(),
-            ], $data),
-        ], 201);
+        $mr = MaintenanceRequest::create($data + [
+            'status'       => 'open',
+        ]);
+
+        return response()->json(['ok' => true, 'request' => $mr->load('equipment')], 201);
     }
 
+    // Complete a request
     public function complete($id)
     {
-        return response()->json([
-            'ok'      => true,
-            'message' => "Maintenance request {$id} completed (dummy)",
-        ]);
+        $mr = MaintenanceRequest::findOrFail($id);
+
+        if ($mr->status === 'done') {
+            return response()->json(['ok' => false, 'message' => 'Request already completed'], 422);
+        }
+
+        $mr->update(['status' => 'done', 'completed_at' => now()]);
+
+        return response()->json(['ok' => true, 'message' => 'Maintenance request completed']);
     }
 }

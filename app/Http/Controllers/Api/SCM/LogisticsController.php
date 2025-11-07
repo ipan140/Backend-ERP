@@ -4,167 +4,139 @@ namespace App\Http\Controllers\Api\SCM;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use App\Models\{Shipment, ShipmentItem, StockMove, StockLevel, Location, Item, Vendor};
 
 class LogisticsController extends Controller
 {
-    /**
-     * GET /api/scm/logistics
-     * Support: ?status=draft|confirmed|done|cancelled&search=...
-     */
     public function index(Request $r)
     {
-        // ====== DUMMY ROWS ======
-        $rows = [
-            [
-                'id'        => 1,
-                'number'    => 'DLV-0001',
-                'ship_date' => now()->toDateString(),
-                'carrier'   => 'Internal Truck',
-                'route'     => 'WH → SBY',
-                'so_id'     => 101,
-                'status'    => 'draft',
-            ],
-            [
-                'id'        => 2,
-                'number'    => 'DLV-0002',
-                'ship_date' => now()->copy()->addDay()->toDateString(),
-                'carrier'   => 'JNE',
-                'route'     => 'SBY → SDA',
-                'so_id'     => 102,
-                'status'    => 'confirmed',
-            ],
-            [
-                'id'        => 3,
-                'number'    => 'DLV-0003',
-                'ship_date' => now()->copy()->subDay()->toDateString(),
-                'carrier'   => 'SiCepat',
-                'route'     => 'SBY → GRESIK',
-                'so_id'     => 103,
-                'status'    => 'done',
-            ],
-        ];
-
-        $status = $r->query('status');
-        $search = trim((string) $r->query('search'));
-
-        $filtered = collect($rows)
-            ->when($status !== null && $status !== '', fn ($c) => $c->where('status', strtolower($status)))
-            ->when($search !== '', function ($c) use ($search) {
-                $q = mb_strtolower($search);
-                return $c->filter(function ($row) use ($q) {
-                    return str_contains(mb_strtolower($row['number']), $q)
-                        || str_contains(mb_strtolower($row['carrier']), $q)
-                        || str_contains(mb_strtolower($row['route']), $q)
-                        || str_contains((string) $row['so_id'], $q);
-                });
-            })
-            ->values()
-            ->all();
-
-        return response()->json([
-            'ok'         => true,
-            'deliveries' => $filtered,
-            'total'      => count($filtered),
-        ]);
+        $q = Shipment::with('vendor:id,name');
+        if ($r->filled('status')) $q->where('status', $r->status);
+        return response()->json($q->orderByDesc('id')->paginate(15));
     }
 
-    /**
-     * POST /api/scm/logistics
-     */
     public function store(Request $r)
     {
         $data = $r->validate([
-            'so_id'               => 'nullable|integer',
-            'ship_date'           => 'required|date',
-            'carrier'             => 'nullable|string',
-            'route'               => 'nullable|string',
-            'items'               => 'required|array|min:1',
-            'items.*.lot_id'      => 'nullable|integer',
-            'items.*.product_id'  => 'required_without:items.*.lot_id|integer',
-            'items.*.qty'         => 'required|numeric|min:0.0001',
-            'items.*.uom'         => 'required|string',
+            'vendor_id'        => 'nullable|integer|exists:vendors,id',
+            'date'             => 'required|date',
+            'from_location_id' => 'nullable|integer|exists:locations,id',
+            'to_location_id'   => 'nullable|integer|exists:locations,id',
+            'items'            => 'required|array|min:1',
+            'items.*.item_id'  => 'required|integer|exists:items,id',
+            'items.*.qty'      => 'required|numeric|min:0.0001',
+            'items.*.uom'      => 'required|string|max:20',
         ]);
 
-        // Dummy create
-        return response()->json([
-            'ok'       => true,
-            'message'  => 'Delivery created (dummy)',
-            'delivery' => array_merge([
-                'id' => 999,
-                'number' => 'DLV-0999',
-                'status' => 'draft',
-            ], $data),
-        ], 201);
+        return DB::transaction(function () use ($data) {
+            $shipment = Shipment::create([
+                'vendor_id'        => $data['vendor_id'] ?? null,
+                'date'             => $data['date'],
+                'from_location_id' => $data['from_location_id'] ?? null,
+                'to_location_id'   => $data['to_location_id'] ?? null,
+                'status'           => 'draft',
+            ]);
+
+            foreach ($data['items'] as $row) {
+                ShipmentItem::create([
+                    'shipment_id' => $shipment->id,
+                    'item_id'     => $row['item_id'],
+                    'qty'         => $row['qty'],
+                    'uom'         => $row['uom'],
+                ]);
+            }
+
+            return response()->json(['ok'=>true,'shipment'=>$shipment->load('items')], 201);
+        });
     }
 
-    /**
-     * GET /api/scm/logistics/{id}
-     */
     public function show($id)
     {
-        return response()->json([
-            'ok'       => true,
-            'delivery' => [
-                'id'        => (int) $id,
-                'number'    => 'DLV-' . str_pad($id, 4, '0', STR_PAD_LEFT),
-                'status'    => 'draft',
-                'items'     => [],
-            ],
-        ]);
+        $ship = Shipment::with(['items.item','vendor'])->findOrFail($id);
+        return response()->json(['ok'=>true,'shipment'=>$ship]);
     }
 
-    /**
-     * PATCH/PUT /api/scm/logistics/{id}  (dummy)
-     */
     public function update(Request $r, $id)
     {
-        $r->validate([
+        $ship = Shipment::findOrFail($id);
+        $data = $r->validate([
+            'date'   => 'nullable|date',
             'status' => 'nullable|in:draft,confirmed,done,cancelled',
         ]);
-
-        return response()->json([
-            'ok'      => true,
-            'message' => "Delivery {$id} updated (dummy)",
-        ]);
+        $ship->update($data);
+        return response()->json(['ok'=>true,'shipment'=>$ship]);
     }
 
-    /**
-     * DELETE /api/scm/logistics/{id}  (dummy)
-     */
     public function destroy($id)
     {
-        return response()->json([
-            'ok'      => true,
-            'message' => "Delivery {$id} deleted (dummy)",
-        ]);
+        $ship = Shipment::findOrFail($id);
+        $ship->delete();
+        return response()->json(['ok'=>true]);
     }
 
-    /**
-     * POST /api/scm/logistics/{id}/confirm
-     */
+    // Konfirmasi (lock edit, belum gerakkan stok)
     public function confirm($id)
     {
-        return response()->json([
-            'ok'      => true,
-            'message' => "Delivery {$id} confirmed (dummy)",
-        ]);
+        $ship = Shipment::findOrFail($id);
+        if ($ship->status !== 'draft') {
+            return response()->json(['ok'=>false,'message'=>'Only draft can be confirmed'], 422);
+        }
+        $ship->update(['status'=>'confirmed']);
+        return response()->json(['ok'=>true,'message'=>'Shipment confirmed']);
     }
 
-    /**
-     * POST /api/scm/logistics/{id}/pod
-     */
+    // Proof of Delivery (generate StockMove sesuai arah)
     public function proofOfDelivery(Request $r, $id)
     {
-        $data = $r->validate([
-            'signed_by' => 'nullable|string',
-            'photo_url' => 'nullable|url',
-            'note'      => 'nullable|string',
-        ]);
+        $ship = Shipment::with('items')->findOrFail($id);
+        if ($ship->status !== 'confirmed') {
+            return response()->json(['ok'=>false,'message'=>'Shipment must be confirmed first'], 422);
+        }
 
-        return response()->json([
-            'ok'      => true,
-            'message' => "POD for Delivery {$id} stored (dummy)",
-            'pod'     => $data,
-        ]);
+        DB::transaction(function () use ($ship) {
+            foreach ($ship->items as $si) {
+                // arah: jika from_location ada → OUT dari from, jika to_location ada → IN ke to
+                if ($ship->from_location_id) {
+                    StockMove::create([
+                        'item_id'          => $si->item_id,
+                        'from_location_id' => $ship->from_location_id,
+                        'to_location_id'   => null,
+                        'qty'              => $si->qty,
+                        'uom'              => $si->uom,
+                        'type'             => 'out',
+                        'ref'              => 'shipment#'.$ship->id,
+                        'moved_at'         => now(),
+                    ]);
+                    $lvl = StockLevel::firstOrCreate(
+                        ['item_id'=>$si->item_id,'location_id'=>$ship->from_location_id],
+                        ['qty'=>0]
+                    );
+                    $lvl->decrement('qty', $si->qty);
+                }
+
+                if ($ship->to_location_id) {
+                    StockMove::create([
+                        'item_id'          => $si->item_id,
+                        'from_location_id' => null,
+                        'to_location_id'   => $ship->to_location_id,
+                        'qty'              => $si->qty,
+                        'uom'              => $si->uom,
+                        'type'             => 'in',
+                        'ref'              => 'shipment#'.$ship->id,
+                        'moved_at'         => now(),
+                    ]);
+                    $lvl = StockLevel::firstOrCreate(
+                        ['item_id'=>$si->item_id,'location_id'=>$ship->to_location_id],
+                        ['qty'=>0]
+                    );
+                    $lvl->increment('qty', $si->qty);
+                }
+            }
+
+            $ship->update(['status'=>'done']);
+        });
+
+        return response()->json(['ok'=>true,'message'=>'POD recorded & stock moved']);
     }
 }

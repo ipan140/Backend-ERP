@@ -3,37 +3,36 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class StockMove extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
-        'item_id',
-        'from_warehouse_id',
-        'to_warehouse_id',
-        'qty',
-        'status',
-        'reference_type',
-        'reference_id',
-        'moved_at',
+        'item_id','from_location_id','to_location_id','lot_id',
+        'qty','uom','state','ref',
     ];
 
-    protected $casts = [
-        'qty' => 'float',
-        'moved_at' => 'datetime',
-    ];
+    protected $casts = ['qty' => 'decimal:6'];
 
     public function item()
     {
         return $this->belongsTo(Item::class);
     }
 
-    public function fromWarehouse()
+    public function fromLocation()
     {
-        return $this->belongsTo(Warehouse::class, 'from_warehouse_id');
+        return $this->belongsTo(Location::class, 'from_location_id');
     }
 
-    public function toWarehouse()
+    public function toLocation()
     {
-        return $this->belongsTo(Warehouse::class, 'to_warehouse_id');
+        return $this->belongsTo(Location::class, 'to_location_id');
+    }
+
+    public function lot()
+    {
+        return $this->belongsTo(Lot::class);
     }
 }

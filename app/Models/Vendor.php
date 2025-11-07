@@ -2,32 +2,25 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Vendor extends Model
 {
     use HasFactory;
 
-    protected $table = 'vendors';
-
     protected $fillable = [
-        'code',
-        'name',
-        'email',
-        'phone',
-        'address',
+        'code','name','email','phone','address','rating','active',
     ];
 
+    protected $casts = [
+        'rating' => 'decimal:2',
+        'active' => 'boolean',
+    ];
 
-    // === Relationships ===
+    // Procurement
     public function purchases()
     {
-        return $this->hasMany(Purchase::class, 'vendor_id');
-    }
-
-    public function shipments()
-    {
-        return $this->hasMany(Shipment::class, 'vendor_id');
+        return $this->hasMany(Purchase::class);
     }
 }
