@@ -3,48 +3,51 @@
 namespace App\Http\Controllers\Api\SCM;
 
 use App\Http\Controllers\Controller;
-use App\Models\SCM\ProcessingWorkOrder;
-use App\Models\SCM\ProcessingInput;
-use App\Models\SCM\ProcessingOutput;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
+use App\Models\{
+    WorkOrder,
+    WorkOrderInput,
+    WorkOrderOutput,
+    Lot,
+    StockMove,
+    StockLevel
+};
 
 class ProcessingController extends Controller
 {
     /**
      * GET /api/scm/processing/workorders
-     * Query params: search, status (draft|in_progress|finished), date_from, date_to, per_page
+     * Kembalikan { workorders: [...] } agar cocok dengan Vue.
      */
-    public function index(Request $r)
+    public function index()
     {
-        $perPage = (int) $r->integer('per_page', 15);
+        $list = WorkOrder::with(['asset','inputs','outputs'])
+            ->orderByDesc('id')
+            ->get()
+            ->map(function ($wo) {
+                return [
+                    'id'     => $wo->id,
+                    // Komponen Vue menampilkan r.name → ambil dari title bila ada
+                    'name'   => $wo->title ?? $wo->number ?? ('WO#'.$wo->id),
+                    'status' => $wo->status ?? 'draft',
+                    // Normalisasi input/output menjadi array sederhana
+                    'input'  => $wo->inputs->map(fn ($i) => [
+                        'product_id' => $i->product_id,
+                        'uom'        => $i->uom,
+                        'qty'        => (float)$i->qty,
+                        'lot_id'     => $i->lot_id,
+                    ])->values(),
+                    'output' => $wo->outputs->map(fn ($o) => [
+                        'product_id' => $o->product_id,
+                        'uom'        => $o->uom,
+                        // Tampilkan rencana bila actual belum diisi
+                        'qty'        => (float)($o->qty_actual ?: $o->qty_plan),
+                    ])->values(),
+                ];
+            });
 
-        $q = ProcessingWorkOrder::query()
-            ->with([
-                'inputs:id,work_order_id,product_id,lot_id,qty,uom',
-                'outputs:id,work_order_id,product_id,qty_plan,qty_actual,uom',
-            ])
-            ->when($r->filled('search'), fn ($qq) =>
-                $qq->where(function ($w) use ($r) {
-                    $term = trim($r->get('search'));
-                    $w->where('name', 'like', "%{$term}%")
-                      ->orWhere('id', $term);
-                })
-            )
-            ->when($r->filled('status'), fn ($qq) =>
-                $qq->where('status', $r->get('status'))
-            )
-            ->when($r->filled('date_from'), fn ($qq) =>
-                $qq->whereDate('created_at', '>=', $r->date('date_from')->format('Y-m-d'))
-            )
-            ->when($r->filled('date_to'), fn ($qq) =>
-                $qq->whereDate('created_at', '<=', $r->date('date_to')->format('Y-m-d'))
-            )
-            ->orderByDesc('id');
-
-        return response()->json($q->paginate($perPage));
+        return response()->json(['workorders' => $list]);
     }
 
     /**
@@ -52,211 +55,221 @@ class ProcessingController extends Controller
      */
     public function show($id)
     {
-        $wo = ProcessingWorkOrder::with([
-            'inputs:id,work_order_id,product_id,lot_id,qty,uom',
-            'outputs:id,work_order_id,product_id,qty_plan,qty_actual,uom',
-        ])->findOrFail($id);
+        $wo = WorkOrder::with(['asset','inputs.lot','outputs'])->findOrFail($id);
 
-        return response()->json([
-            'ok' => true,
-            'workorder' => $wo,
-        ]);
+        $payload = [
+            'id'       => $wo->id,
+            'name'     => $wo->title ?? $wo->number ?? ('WO#'.$wo->id),
+            'status'   => $wo->status ?? 'draft',
+            'asset_id' => $wo->asset_id,
+            'inputs'   => $wo->inputs->map(fn ($i) => [
+                'product_id' => $i->product_id,
+                'uom'        => $i->uom,
+                'qty'        => (float)$i->qty,
+                'lot_id'     => $i->lot_id,
+            ])->values(),
+            'outputs'  => $wo->outputs->map(fn ($o) => [
+                'product_id' => $o->product_id,
+                'uom'        => $o->uom,
+                'qty_plan'   => (float)$o->qty_plan,
+                'qty_actual' => (float)$o->qty_actual,
+            ])->values(),
+        ];
+
+        return response()->json(['ok' => true, 'workorder' => $payload]);
     }
 
     /**
      * POST /api/scm/processing/workorders
-     * Body:
-     * {
-     *   "name": "optional",
-     *   "input": [{ "product_id": 1|null, "lot_id": 10|null, "qty": 2.5, "uom": "kg" }, ...],
-     *   "output": [{ "product_id": 99, "qty": 1.2, "uom": "kg" }, ...]
-     * }
+     * Komponen kirim { name?, input[], output[] } → kita dukung “name” (opsional).
      */
     public function store(Request $r)
     {
-        // Validasi dasar
-        $v = Validator::make($r->all(), [
-            'name' => ['nullable', 'string', 'max:200'],
+        $data = $r->validate([
+            'asset_id'       => 'nullable|integer|exists:assets,id',
+            'title'          => 'nullable|string|max:200', // dukung kalau backend lama kirim "title"
+            'name'           => 'nullable|string|max:200', // dari Vue
+            'notes'          => 'nullable|string',
+            'scheduled_date' => 'nullable|date',
+            'priority'       => 'nullable|in:low,normal,high',
 
-            'input' => ['required', 'array', 'min:1'],
-            'input.*.product_id' => ['nullable', 'integer', 'min:1'],
-            'input.*.lot_id'     => ['nullable', 'integer', 'min:1'],
-            'input.*.qty'        => ['required', 'numeric', 'min:0.0001'],
-            'input.*.uom'        => ['required', 'string', 'max:50'],
+            'input'               => 'required|array|min:1',
+            'input.*.lot_id'      => 'nullable|integer|exists:lots,id',
+            'input.*.product_id'  => 'required_without:input.*.lot_id|integer|exists:items,id',
+            'input.*.qty'         => 'required|numeric|min:0.0001',
+            'input.*.uom'         => 'required|string|max:50',
 
-            'output' => ['required', 'array', 'min:1'],
-            'output.*.product_id' => ['required', 'integer', 'min:1'],
-            'output.*.qty'        => ['required', 'numeric', 'min:0.0001'],
-            'output.*.uom'        => ['required', 'string', 'max:50'],
+            'output'              => 'required|array|min:1',
+            'output.*.product_id' => 'required|integer|exists:items,id',
+            'output.*.qty'        => 'required|numeric|min:0.0001',
+            'output.*.uom'        => 'required|string|max:50',
         ]);
 
-        // Post-validation: setiap input WAJIB punya minimal product_id ATAU lot_id
-        $v->after(function ($validator) use ($r) {
-            $inputs = $r->input('input', []);
-            foreach ($inputs as $idx => $row) {
-                $hasProduct = !empty($row['product_id']);
-                $hasLot     = !empty($row['lot_id']);
-                if (!$hasProduct && !$hasLot) {
-                    $validator->errors()->add("input.$idx.product_id", "Wajib isi minimal product_id atau lot_id.");
-                    $validator->errors()->add("input.$idx.lot_id", "Wajib isi minimal product_id atau lot_id.");
-                }
-            }
-        });
-
-        $v->validate();
-
-        // Mapping bersih
-        $name   = trim((string) $r->input('name', ''));
-        $inputs = collect($r->input('input'))->map(function ($row) {
-            return [
-                'product_id' => $row['product_id'] ?? null,
-                'lot_id'     => $row['lot_id'] ?? null,
-                'qty'        => (float) $row['qty'],
-                'uom'        => trim((string) $row['uom']),
-            ];
-        });
-
-        $outputs = collect($r->input('output'))->map(function ($row) {
-            return [
-                'product_id' => (int) $row['product_id'],
-                'qty_plan'   => (float) $row['qty'],
-                'uom'        => trim((string) $row['uom']),
-            ];
-        });
-
-        // Simpan dalam transaksi
-        $wo = DB::transaction(function () use ($name, $inputs, $outputs) {
-            /** @var \App\Models\SCM\ProcessingWorkOrder $wo */
-            $wo = ProcessingWorkOrder::create([
-                'name'   => $name ?: null,
-                'status' => 'draft',
+        return DB::transaction(function () use ($data) {
+            $wo = WorkOrder::create([
+                'asset_id'       => $data['asset_id'] ?? null,
+                'title'          => $data['title'] ?? ($data['name'] ?? null),
+                'notes'          => $data['notes'] ?? null,
+                'scheduled_date' => $data['scheduled_date'] ?? null,
+                'priority'       => $data['priority'] ?? 'normal',
+                'status'         => 'draft',
+                'number'         => 'WO' . now()->format('ymdHis'),
             ]);
 
-            // Inputs
-            foreach ($inputs as $row) {
-                $row['work_order_id'] = $wo->id;
-                ProcessingInput::create($row);
+            foreach ($data['input'] as $in) {
+                // Jika pakai lot_id, turunkan product_id dari lot
+                $productId = $in['product_id'] ?? optional(Lot::find($in['lot_id']))->item_id;
+
+                WorkOrderInput::create([
+                    'work_order_id' => $wo->id,
+                    'product_id'    => $productId,
+                    'lot_id'        => $in['lot_id'] ?? null,
+                    'qty'           => $in['qty'],
+                    'uom'           => $in['uom'],
+                ]);
             }
 
-            // Outputs (plan)
-            foreach ($outputs as $row) {
-                $row['work_order_id'] = $wo->id;
-                // qty_actual default null
-                ProcessingOutput::create($row);
+            foreach ($data['output'] as $out) {
+                WorkOrderOutput::create([
+                    'work_order_id' => $wo->id,
+                    'product_id'    => $out['product_id'],
+                    'qty_plan'      => $out['qty'],
+                    'qty_actual'    => 0,
+                    'uom'           => $out['uom'],
+                ]);
             }
 
-            return $wo->load([
-                'inputs:id,work_order_id,product_id,lot_id,qty,uom',
-                'outputs:id,work_order_id,product_id,qty_plan,qty_actual,uom',
-            ]);
+            // Kembalikan bentuk yang “klik” dengan frontend
+            $payload = [
+                'id'     => $wo->id,
+                'name'   => $wo->title ?? $wo->number ?? ('WO#'.$wo->id),
+                'status' => $wo->status,
+                'input'  => $wo->inputs()->get()->map(fn ($i) => [
+                    'product_id' => $i->product_id,
+                    'uom'        => $i->uom,
+                    'qty'        => (float)$i->qty,
+                    'lot_id'     => $i->lot_id,
+                ])->values(),
+                'output' => $wo->outputs()->get()->map(fn ($o) => [
+                    'product_id' => $o->product_id,
+                    'uom'        => $o->uom,
+                    'qty'        => (float)$o->qty_plan,
+                ])->values(),
+            ];
+
+            return response()->json(['ok' => true, 'wo' => $payload], 201);
         });
-
-        return response()->json([
-            'ok' => true,
-            'message' => 'Work Order created',
-            'workorder' => $wo,
-        ], 201);
     }
 
     /**
      * POST /api/scm/processing/workorders/{id}/start
-     * Status: draft -> in_progress
+     * Frontend harap status → in_progress
      */
     public function start($id)
     {
-        $wo = ProcessingWorkOrder::findOrFail($id);
+        $wo = WorkOrder::findOrFail($id);
 
-        if ($wo->status !== 'draft') {
-            return response()->json([
-                'ok' => false,
-                'message' => 'Hanya WO berstatus draft yang bisa di-start.',
-            ], 422);
+        if (!in_array($wo->status, ['draft', 'scheduled'], true)) {
+            return response()->json(['ok' => false, 'message' => 'WO must be draft/scheduled'], 422);
         }
 
-        $wo->status = 'in_progress';
-        $wo->started_at = now();
-        $wo->save();
+        $wo->update(['status' => 'in_progress']);
 
-        return response()->json([
-            'ok' => true,
-            'message' => "Work Order {$wo->id} started",
-            'workorder' => $wo->fresh(['inputs', 'outputs']),
-        ]);
+        return response()->json(['ok' => true, 'workorder' => [
+            'id'     => $wo->id,
+            'name'   => $wo->title ?? $wo->number ?? ('WO#'.$wo->id),
+            'status' => $wo->status,
+        ]]);
     }
 
     /**
      * POST /api/scm/processing/workorders/{id}/finish
-     * Body:
-     * { "actual_output": [{ "product_id": 99, "qty": 1.0, "uom": "kg" }, ...] }  // opsional
-     * - Jika tidak dikirim, qty_actual akan diisi sama dengan qty_plan
-     * Status: in_progress -> finished
+     * Frontend kirim { actual_output:[{product_id,uom,qty}] } (opsional)
+     * Status diubah ke 'finished' (samakan dgn Vue).
      */
     public function finish(Request $r, $id)
     {
-        $wo = ProcessingWorkOrder::with('outputs')->findOrFail($id);
+        $wo = WorkOrder::with(['inputs','outputs'])->findOrFail($id);
 
-        if ($wo->status !== 'in_progress') {
-            return response()->json([
-                'ok' => false,
-                'message' => 'Hanya WO berstatus in_progress yang bisa di-finish.',
-            ], 422);
-        }
-
-        $data = $r->validate([
-            'actual_output' => ['nullable', 'array'],
-            'actual_output.*.product_id' => ['required_with:actual_output', 'integer', 'min:1'],
-            'actual_output.*.qty'        => ['required_with:actual_output', 'numeric', 'min:0.0001'],
-            'actual_output.*.uom'        => ['required_with:actual_output', 'string', 'max:50'],
+        $payload = $r->validate([
+            'actual_output'               => 'nullable|array',
+            'actual_output.*.product_id'  => 'required|integer|exists:items,id',
+            'actual_output.*.qty'         => 'required|numeric|min:0.0001',
+            'actual_output.*.uom'         => 'required|string|max:50',
         ]);
 
-        DB::transaction(function () use ($wo, $data) {
-            // Jika ada actual_output → map ke outputs (by product_id + uom)
-            if (!empty($data['actual_output'])) {
-                $byKey = [];
-                foreach ($wo->outputs as $out) {
-                    $key = $out->product_id . '|' . $out->uom;
-                    $byKey[$key] = $out;
+        DB::transaction(function () use ($wo, $payload) {
+            // 1) Konsumsi input → tulis StockMove OUT (jika tabel/kolom ada)
+            foreach ($wo->inputs as $in) {
+                StockMove::create([
+                    'item_id'         => $in->product_id,
+                    'from_location_id'=> $in->from_location_id ?? null, // biarkan null jika tidak pakai lokasi
+                    'to_location_id'  => null,
+                    'qty'             => $in->qty,
+                    'uom'             => $in->uom,
+                    'type'            => 'out',
+                    'lot_id'          => $in->lot_id,
+                    'ref'             => 'WO#'.$wo->id.'-consume',
+                    'moved_at'        => now(),
+                ]);
+
+                if (!empty($in->from_location_id)) {
+                    $level = StockLevel::firstOrCreate(
+                        ['item_id' => $in->product_id, 'location_id' => $in->from_location_id],
+                        ['qty' => 0]
+                    );
+                    $level->decrement('qty', $in->qty);
                 }
 
-                foreach ($data['actual_output'] as $row) {
-                    $key = ((int) $row['product_id']) . '|' . trim((string) $row['uom']);
-                    if (isset($byKey[$key])) {
-                        $out = $byKey[$key];
-                        $out->qty_actual = (float) $row['qty'];
-                        $out->save();
-                    } else {
-                        // Jika pasangan product_id + uom belum ada di plan, bisa pilih:
-                        // 1) buat baris baru sebagai actual-only, atau
-                        // 2) abaikan.
-                        // Di sini kita pilih: buat baris baru dengan qty_plan = 0
-                        ProcessingOutput::create([
-                            'work_order_id' => $wo->id,
-                            'product_id'    => (int) $row['product_id'],
-                            'uom'           => trim((string) $row['uom']),
-                            'qty_plan'      => 0,
-                            'qty_actual'    => (float) $row['qty'],
-                        ]);
-                    }
+                // Hapus update ke kolom qty lot karena skema lots kita tidak punya kolom qty
+                // (Jangan decrement Lot)
+            }
+
+            // 2) Hasil produksi
+            $outs = $payload['actual_output'] ?? $wo->outputs->map(fn($o) => [
+                'product_id' => $o->product_id,
+                'qty'        => $o->qty_plan,
+                'uom'        => $o->uom,
+            ])->toArray();
+
+            foreach ($outs as $o) {
+                // Update qty_actual pada baris output yg sesuai product_id
+                $row = $wo->outputs->firstWhere('product_id', $o['product_id']);
+                if ($row) {
+                    $row->update(['qty_actual' => $o['qty']]);
                 }
-            } else {
-                // Jika tak ada actual_output → samakan actual = plan
-                foreach ($wo->outputs as $out) {
-                    $out->qty_actual = $out->qty_plan;
-                    $out->save();
+
+                StockMove::create([
+                    'item_id'         => $o['product_id'],
+                    'from_location_id'=> null,
+                    'to_location_id'  => $row->to_location_id ?? null,
+                    'qty'             => $o['qty'],
+                    'uom'             => $o['uom'],
+                    'type'            => 'in',
+                    'ref'             => 'WO#'.$wo->id.'-produce',
+                    'moved_at'        => now(),
+                ]);
+
+                if (!empty($row?->to_location_id)) {
+                    $level = StockLevel::firstOrCreate(
+                        ['item_id' => $o['product_id'], 'location_id' => $row->to_location_id],
+                        ['qty' => 0]
+                    );
+                    $level->increment('qty', $o['qty']);
                 }
             }
 
-            $wo->status = 'finished';
-            $wo->finished_at = now();
-            $wo->save();
+            $wo->update(['status' => 'finished', 'completed_at' => now()]);
         });
 
-        $wo = $wo->fresh(['inputs', 'outputs']);
-
         return response()->json([
-            'ok' => true,
-            'message' => "Work Order {$wo->id} finished",
-            'workorder' => $wo,
+            'ok'        => true,
+            'message'   => 'WO finished',
+            'workorder' => [
+                'id'     => $wo->id,
+                'name'   => $wo->title ?? $wo->number ?? ('WO#'.$wo->id),
+                'status' => 'finished',
+            ],
         ]);
     }
 }

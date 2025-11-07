@@ -3,18 +3,26 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use App\Models\Warehouse;
+use App\Models\Location;
+use App\Models\Item;
 use App\Models\StockLevel;
 
 class StockLevelSeeder extends Seeder
 {
     public function run(): void
     {
-        if (StockLevel::count() === 0) {
-            StockLevel::insert([
-                ['warehouse_id' => 1, 'item_id' => 1, 'quantity' => 100],
-                ['warehouse_id' => 1, 'item_id' => 2, 'quantity' => 50],
-                ['warehouse_id' => 2, 'item_id' => 3, 'quantity' => 75],
-            ]);
+        $stockCode = 'STK-001';
+        $items = Item::get();
+        foreach (Warehouse::get() as $wh) {
+            $loc = Location::where('warehouse_id', $wh->id)->where('code', $stockCode)->first();
+            if (!$loc) continue;
+            foreach ($items as $it) {
+                StockLevel::firstOrCreate(
+                    ['item_id' => $it->id, 'location_id' => $loc->id],
+                    ['qty' => 0]
+                );
+            }
         }
     }
 }

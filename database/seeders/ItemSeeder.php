@@ -9,30 +9,11 @@ class ItemSeeder extends Seeder
 {
     public function run(): void
     {
-        if (Item::count() === 0) {
-            Item::insert([
-                [
-                    'sku' => 'ITM-001',
-                    'name' => 'Pupuk NPK 50kg',
-                    'unit' => 'kg',
-                    'price' => 250000,
-                    'description' => 'Pupuk NPK 15-15-15 untuk tanaman hortikultura',
-                ],
-                [
-                    'sku' => 'ITM-002',
-                    'name' => 'Bibit Cabai Merah',
-                    'unit' => 'pack',
-                    'price' => 50000,
-                    'description' => 'Bibit unggul cabai merah tahan penyakit',
-                ],
-                [
-                    'sku' => 'ITM-003',
-                    'name' => 'Pestisida Cair 1L',
-                    'unit' => 'liter',
-                    'price' => 85000,
-                    'description' => 'Pestisida untuk pengendalian hama daun',
-                ],
-            ]);
-        }
+        $rows = [
+            ['sku' => 'ITM-UREA', 'name' => 'Urea Granular', 'uom' => 'kg',  'is_stockable' => true, 'std_cost' => 6500],
+            ['sku' => 'ITM-NPK',  'name' => 'NPK 16-16-16',  'uom' => 'kg',  'is_stockable' => true, 'std_cost' => 8000],
+            ['sku' => 'ITM-BAG',  'name' => 'Karung 25kg',   'uom' => 'pcs', 'is_stockable' => true, 'std_cost' => 2500],
+        ];
+        foreach ($rows as $r) Item::updateOrCreate(['sku' => $r['sku']], $r);
     }
 }

@@ -2,14 +2,19 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Purchase extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['number', 'vendor_id', 'date', 'status', 'total'];
+    protected $fillable = ['number','vendor_id','order_date','status','total'];
+
+    protected $casts = [
+        'order_date' => 'date',
+        'total'      => 'decimal:6',
+    ];
 
     public function vendor()
     {

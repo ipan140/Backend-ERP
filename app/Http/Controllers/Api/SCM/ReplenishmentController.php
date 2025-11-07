@@ -4,185 +4,177 @@ namespace App\Http\Controllers\Api\SCM;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\{Replenishment, Item, Warehouse, StockLevel};
 
 class ReplenishmentController extends Controller
 {
     /**
-     * GET /api/scm/replenishments
-     * Support: search, page, per_page (dummy list for now)
+     * List all replenishment rules.
      */
     public function index(Request $r)
     {
-        $search   = trim((string) $r->get('search', ''));
-        $page     = max(1, (int) $r->get('page', 1));
-        $perPage  = max(1, min(100, (int) $r->get('per_page', 15)));
+        $query = Replenishment::with([
+            'item:id,name',
+            'warehouse:id,name',
+        ]);
 
-        // Dummy data (nanti ganti ke query DB)
-        $all = [
-            [
-                'id' => 1, 'product_id' => 1, 'location_id' => 1,
-                'min_qty' => 10, 'max_qty' => 100, 'uom' => 'kg',
-                'policy' => 'MTS', 'vendor_id' => null, 'lead_time_days' => 3,
-                'is_active' => true,
-            ],
-            [
-                'id' => 2, 'product_id' => 2, 'location_id' => 1,
-                'min_qty' => 5, 'max_qty' => 50, 'uom' => 'kg',
-                'policy' => 'MTO', 'vendor_id' => 10, 'lead_time_days' => 7,
-                'is_active' => true,
-            ],
-        ];
-
-        // Filter sederhana by search (product/location text contains)
-        if ($search !== '') {
-            $all = array_values(array_filter($all, function ($row) use ($search) {
-                return str_contains((string) $row['product_id'], $search)
-                    || str_contains((string) $row['location_id'], $search)
-                    || str_contains((string) $row['uom'], $search)
-                    || str_contains((string) ($row['policy'] ?? ''), $search);
-            }));
+        if ($r->filled('search')) {
+            $s = trim((string) $r->search);
+            if ($s !== '') {
+                $query->where(function ($q) use ($s) {
+                    $q->whereHas('item', fn ($qq) => $qq->where('name', 'like', "%{$s}%"))
+                      ->orWhereHas('warehouse', fn ($qq) => $qq->where('name', 'like', "%{$s}%"));
+                });
+            }
         }
 
-        $total  = count($all);
-        $offset = ($page - 1) * $perPage;
-        $slice  = array_slice($all, $offset, $perPage);
+        $p = $query->orderByDesc('id')->paginate(20);
 
+        // Kompatibel dengan beberapa versi frontend:
+        // - this.rows = data?.data
+        // - this.rows = data?.replenishments
+        // - atau langsung baca meta.pagination
         return response()->json([
-            'ok'   => true,
-            'data' => $slice,
-            'meta' => [
-                'page'      => $page,
-                'per_page'  => $perPage,
-                'total'     => $total,
-                'total_page'=> (int) ceil($total / $perPage),
+            'ok'              => true,
+            'data'            => $p->items(),            // ← array saja
+            'replenishments'  => $p->items(),            // ← alias, biar aman
+            'pagination'      => [                       // ← meta ringkas
+                'current_page' => $p->currentPage(),
+                'per_page'     => $p->perPage(),
+                'total'        => $p->total(),
+                'last_page'    => $p->lastPage(),
             ],
-            'note' => 'List reorder rules (dummy). Ganti ke paginate(DB) bila tabel siap.',
         ]);
     }
 
     /**
-     * POST /api/scm/replenishments
+     * Create a new replenishment rule.
      */
     public function store(Request $r)
     {
         $data = $r->validate([
-            'product_id'      => 'required|integer',
-            'location_id'     => 'required|integer',
-            'min_qty'         => 'required|numeric|min:0',
-            'max_qty'         => 'required|numeric|gt:min_qty',
-            'uom'             => 'required|string',
-            'policy'          => 'nullable|string|in:MTS,MTO',
-            'vendor_id'       => 'nullable|integer',
-            'lead_time_days'  => 'nullable|integer|min:0',
-            'is_active'       => 'nullable|boolean',
+            'item_id'      => 'required|integer|exists:items,id',
+            'warehouse_id' => 'required|integer|exists:warehouses,id',
+            'min_qty'      => 'required|numeric|min:0',
+            'max_qty'      => 'required|numeric|gte:min_qty',
+            'reorder_qty'  => 'nullable|numeric|min:0',
+            'active'       => 'boolean',
         ]);
 
-        $rule = array_merge([
-            'id'            => 1,                // dummy id
-            'is_active'     => $data['is_active'] ?? true,
-        ], $data);
+        // default active = true jika tidak dikirim
+        if (!array_key_exists('active', $data)) {
+            $data['active'] = true;
+        }
+
+        $rule = Replenishment::create($data)->load(['item:id,name', 'warehouse:id,name']);
 
         return response()->json([
-            'ok'      => true,
-            'message' => 'Reorder rule saved (dummy)',
-            'rule'    => $rule,
+            'ok'             => true,
+            'replenishment'  => $rule,
         ], 201);
     }
 
     /**
-     * GET /api/scm/replenishments/{id}
+     * Show detail of a rule.
      */
-    public function show(int $id)
+    public function show($id)
     {
-        // Dummy detail
+        $rule = Replenishment::with(['item:id,name', 'warehouse:id,name'])->findOrFail($id);
+
         return response()->json([
-            'ok'   => true,
-            'rule' => [
-                'id'             => $id,
-                'product_id'     => 1,
-                'location_id'    => 1,
-                'min_qty'        => 10,
-                'max_qty'        => 100,
-                'uom'            => 'kg',
-                'policy'         => 'MTS',
-                'vendor_id'      => null,
-                'lead_time_days' => 3,
-                'is_active'      => true,
-            ],
+            'ok'             => true,
+            'replenishment'  => $rule,
         ]);
     }
 
     /**
-     * PUT/PATCH /api/scm/replenishments/{id}
+     * Update a rule.
      */
-    public function update(Request $r, int $id)
+    public function update(Request $r, $id)
     {
+        $rule = Replenishment::findOrFail($id);
+
         $data = $r->validate([
-            'product_id'      => 'sometimes|required|integer',
-            'location_id'     => 'sometimes|required|integer',
-            'min_qty'         => 'sometimes|required|numeric|min:0',
-            'max_qty'         => 'sometimes|required|numeric|gt:min_qty',
-            'uom'             => 'sometimes|required|string',
-            'policy'          => 'nullable|string|in:MTS,MTO',
-            'vendor_id'       => 'nullable|integer',
-            'lead_time_days'  => 'nullable|integer|min:0',
-            'is_active'       => 'nullable|boolean',
+            'item_id'      => 'sometimes|integer|exists:items,id',
+            'warehouse_id' => 'sometimes|integer|exists:warehouses,id',
+            'min_qty'      => 'sometimes|numeric|min:0',
+            'max_qty'      => 'sometimes|numeric|gte:min_qty',
+            'reorder_qty'  => 'nullable|numeric|min:0',
+            'active'       => 'boolean',
         ]);
 
+        $rule->update($data);
+
         return response()->json([
-            'ok'      => true,
-            'message' => "Rule {$id} updated (dummy)",
-            'rule'    => array_merge(['id' => $id], $data),
+            'ok'             => true,
+            'replenishment'  => $rule->fresh()->load(['item:id,name', 'warehouse:id,name']),
         ]);
     }
 
     /**
-     * DELETE /api/scm/replenishments/{id}
+     * Delete a rule.
      */
-    public function destroy(int $id)
+    public function destroy($id)
     {
-        return response()->json([
-            'ok'      => true,
-            'message' => "Rule {$id} deleted (dummy)",
-        ]);
+        $rule = Replenishment::findOrFail($id);
+        $rule->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     /**
-     * POST /api/scm/replenishments/check
-     * Optional: days_ahead (int >= 0)
+     * Check which items need replenishment.
      */
     public function check(Request $r)
     {
-        $r->validate([
-            'days_ahead' => 'nullable|integer|min:0',
-        ]);
+        $rules = Replenishment::with(['item:id,name', 'warehouse:id,name'])
+            ->where('active', true)
+            ->get();
 
-        // Contoh hasil rekomendasi
-        $result = [
-            // ['product_id' => 1, 'location_id' => 1, 'suggested_qty' => 200, 'uom' => 'kg', 'reason' => 'below min'],
-        ];
+        $results = [];
+
+        foreach ($rules as $rule) {
+            // Ambil level stok per (item, warehouse). Jika belum ada, anggap 0.
+            $level = StockLevel::firstOrNew(
+                [
+                    'item_id'      => $rule->item_id,
+                    'warehouse_id' => $rule->warehouse_id,
+                ],
+                ['qty' => 0]
+            );
+
+            // Butuh isi ulang jika di bawah min
+            if ((float) $level->qty < (float) $rule->min_qty) {
+                $results[] = [
+                    'rule_id'      => $rule->id,
+                    'item_id'      => $rule->item_id,
+                    'item'         => $rule->item?->name,
+                    'warehouse_id' => $rule->warehouse_id,
+                    'warehouse'    => $rule->warehouse?->name,
+                    'current_qty'  => (float) $level->qty,
+                    'min_qty'      => (float) $rule->min_qty,
+                    'max_qty'      => (float) $rule->max_qty,
+                    'reorder_qty'  => (float) ($rule->reorder_qty ?? 0),
+                    'suggest_qty'  => (float) max(0, (float) $rule->max_qty - (float) $level->qty),
+                ];
+            }
+        }
 
         return response()->json([
-            'ok'     => true,
-            'result' => $result,
+            'ok'      => true,
+            'results' => $results,
         ]);
     }
 
     /**
-     * POST /api/scm/replenishments/auto-generate
-     * Optional: mode (PO|MO|BOTH)
+     * Auto generate purchase/manufacturing order (optional).
      */
     public function autoGenerate(Request $r)
     {
-        $r->validate([
-            'mode' => 'nullable|in:PO,MO,BOTH',
-        ]);
-
-        // Dummy outcome
+        // Integrasi ke modul Purchase/Production bisa ditambahkan di sini
         return response()->json([
-            'ok'        => true,
-            'message'   => 'Auto-generated PO/MO based on rules (dummy)',
-            'generated' => ['po_count' => 0, 'mo_count' => 0],
+            'ok'      => true,
+            'message' => 'Auto-generate not implemented yet',
         ]);
     }
 }

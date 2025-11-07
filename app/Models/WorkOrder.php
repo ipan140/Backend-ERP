@@ -2,34 +2,24 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class WorkOrder extends Model
 {
     use HasFactory;
 
-    /** Status & Priority yang valid (ikuti enum di migration) */
-    public const STATUS_OPEN         = 'open';
-    public const STATUS_SCHEDULED    = 'scheduled';
-    public const STATUS_IN_PROGRESS  = 'in_progress';
-    public const STATUS_DONE         = 'done';
-    public const STATUS_CANCELLED    = 'cancelled';
-
-    public const PRIORITY_LOW    = 'low';
-    public const PRIORITY_NORMAL = 'normal';
-    public const PRIORITY_HIGH   = 'high';
-
     protected $fillable = [
         'number',
-        'asset_id',
+        'asset_id',        // pastikan kolom ini ada di tabel work_orders
+        // (opsional) 'equipment_id', jika kamu juga pakai per-alat
         'title',
         'notes',
         'scheduled_date',
-        'technician',
-        'status',
-        'priority',
         'completed_at',
+        'technician',
+        'status',          // draft|in_progress|done|cancelled (sesuaikan)
+        'priority',        // low|medium|high|urgent (sesuaikan)
     ];
 
     protected $casts = [
@@ -37,28 +27,45 @@ class WorkOrder extends Model
         'completed_at'   => 'datetime',
     ];
 
-    /** Relasi */
+    /* ===================== RELATIONS ===================== */
+
+    // ✅ Relasi yang diminta (menghilangkan error "undefined relationship [asset]")
     public function asset()
     {
-        return $this->belongsTo(Asset::class);
+        // table: assets (default Eloquent)
+        // kolom FK di work_orders: asset_id
+        return $this->belongsTo(Asset::class, 'asset_id');
     }
 
-    /** Scopes kecil yang berguna */
-    public function scopeStatus($query, string $status)
+    // (Opsional) jika kamu juga simpan equipment_id
+    public function equipment()
     {
-        return $query->where('status', $status);
+        return $this->belongsTo(Equipment::class, 'equipment_id');
     }
 
-    public function scopeUpcoming($query)
+    public function inputs()
     {
-        return $query->whereNull('completed_at')
-                     ->whereDate('scheduled_date', '>=', now()->startOfDay())
-                     ->orderBy('scheduled_date');
+        return $this->hasMany(WorkOrderInput::class, 'work_order_id');
     }
 
-    /** Helper */
-    public function getIsCompletedAttribute(): bool
+    public function outputs()
     {
-        return $this->status === self::STATUS_DONE || !is_null($this->completed_at);
+        return $this->hasMany(WorkOrderOutput::class, 'work_order_id');
+    }
+
+    /* ===================== SCOPES (opsional) ===================== */
+
+    // contoh: filter status
+    public function scopeStatus($q, ?string $status)
+    {
+        return $status ? $q->where('status', $status) : $q;
+    }
+
+    // contoh: filter jadwal
+    public function scopeScheduledBetween($q, ?string $from, ?string $to)
+    {
+        if ($from) $q->where('scheduled_date', '>=', $from);
+        if ($to)   $q->where('scheduled_date', '<=', $to);
+        return $q;
     }
 }

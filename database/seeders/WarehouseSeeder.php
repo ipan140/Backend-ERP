@@ -9,19 +9,10 @@ class WarehouseSeeder extends Seeder
 {
     public function run(): void
     {
-        if (Warehouse::count() === 0) {
-            Warehouse::insert([
-                [
-                    'code' => 'WH-01',
-                    'name' => 'Gudang Utama Surabaya',
-                    'location' => 'Jl. Rungkut Industri I No. 12, Surabaya',
-                ],
-                [
-                    'code' => 'WH-02',
-                    'name' => 'Gudang Cabang Sidoarjo',
-                    'location' => 'Jl. Raya Taman No. 5, Sidoarjo',
-                ],
-            ]);
-        }
+        $rows = [
+            ['code' => 'WH-MAIN', 'name' => 'Main Warehouse', 'address' => 'Jl. Industri No.1', 'active' => true],
+            ['code' => 'WH-SEC',  'name' => 'Secondary WH',   'address' => 'Jl. Pergudangan',   'active' => true],
+        ];
+        foreach ($rows as $r) Warehouse::updateOrCreate(['code' => $r['code']], $r);
     }
 }
