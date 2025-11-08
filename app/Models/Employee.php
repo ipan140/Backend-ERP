@@ -41,6 +41,9 @@ class Employee extends Model
         'dob'       => 'date',
     ];
 
+    // Tambahan agar 'name' dan 'code' ikut keluar di JSON response
+    protected $appends = ['name', 'code'];
+
     /* =======================
      | Relationships
      |=======================*/
@@ -135,7 +138,7 @@ class Employee extends Model
 
     public function setFullNameAttribute($val)
     {
-        // jika dikirim manual, pakai saja; kalau kosong, sinkronkan dari first+last
+        // Jika dikirim manual, pakai saja; kalau kosong, sinkronkan dari first+last
         $this->attributes['full_name'] = $val ? trim($val) : null;
     }
 
@@ -150,5 +153,44 @@ class Employee extends Model
                 $this->attributes['full_name'] = $full;
             }
         }
+    }
+
+    /* =======================
+     | Accessors (Virtual Fields)
+     |=======================*/
+
+    /**
+     * Virtual field 'name' agar kompatibel dengan relasi lama
+     * dan komponen FE yang membaca employee.name
+     */
+    public function getNameAttribute(): string
+    {
+        $full  = $this->attributes['full_name'] ?? null;
+        $first = $this->attributes['first_name'] ?? null;
+        $last  = $this->attributes['last_name'] ?? null;
+        $empNo = $this->attributes['emp_no'] ?? null;
+
+        if ($full && trim($full) !== '') {
+            return $full;
+        }
+
+        $combo = trim(trim((string) $first) . ' ' . trim((string) $last));
+        if ($combo !== '') {
+            return $combo;
+        }
+
+        if ($empNo && trim($empNo) !== '') {
+            return $empNo;
+        }
+
+        return 'Employee #' . $this->getKey();
+    }
+
+    /**
+     * Virtual field 'code' agar kompatibel dengan sistem lain (contohnya Attendance)
+     */
+    public function getCodeAttribute(): ?string
+    {
+        return $this->attributes['emp_no'] ?? null;
     }
 }

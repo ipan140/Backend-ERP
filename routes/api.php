@@ -43,6 +43,13 @@ use App\Http\Controllers\Api\HR\SalaryStructureController;
 use App\Http\Controllers\Api\HR\SalaryRuleController;
 use App\Http\Controllers\Api\HR\PayslipController;
 
+/* ===== Accounting ===== */
+use App\Http\Controllers\Api\Accounting\AccountController;
+use App\Http\Controllers\Api\Accounting\JournalController;
+use App\Http\Controllers\Api\Accounting\MoveController;
+use App\Http\Controllers\Api\Accounting\MovePostController;
+use App\Http\Controllers\Api\Accounting\ReportController as AccReportController;
+
 /* ===== Models (lookup) ===== */
 use App\Models\{Item, Warehouse};
 
@@ -65,6 +72,36 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile', [AuthController::class, 'profile'])->name('auth.profile');
     Route::post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
 
+    /* ======= My Attendance (untuk user yang login) ======= */
+    Route::get('/my-attendance/today',     [AttendanceController::class, 'myToday'])->name('my-attendance.today');
+    Route::get('/my-attendance',           [AttendanceController::class, 'myIndex'])->name('my-attendance.index');
+    Route::post('/my-attendance/checkin',  [AttendanceController::class, 'checkIn'])->name('my-attendance.checkin');
+    Route::post('/my-attendance/checkout', [AttendanceController::class, 'checkOut'])->name('my-attendance.checkout');
+
+    // ✨ Tambahan opsional (tidak mengganti yang lama)
+    Route::get('/my-attendance/open',      [AttendanceController::class, 'myOpen'])->name('my-attendance.open');
+    Route::get('/my-attendance/summary',   [AttendanceController::class, 'myMonthlySummary'])->name('my-attendance.summary');
+
+    /* ==================== ACCOUNTING ==================== */
+    Route::prefix('accounting')->as('accounting.')->group(function () {
+        Route::apiResource('accounts', AccountController::class);
+        Route::apiResource('journals', JournalController::class);
+
+        Route::get('moves',                         [MoveController::class, 'index'])->name('moves.index');
+        Route::post('moves',                        [MoveController::class, 'store'])->name('moves.store');
+        Route::get('moves/{move}',                  [MoveController::class, 'show'])->whereNumber('move')->name('moves.show');
+        Route::match(['put', 'patch'], 'moves/{move}', [MoveController::class, 'update'])->whereNumber('move')->name('moves.update');
+        Route::delete('moves/{move}',               [MoveController::class, 'destroy'])->whereNumber('move')->name('moves.destroy');
+
+        Route::post('moves/{move}/post',            [MovePostController::class, 'post'])->whereNumber('move')->name('moves.post');
+        Route::post('moves/bulk-post',              [MovePostController::class, 'bulkPost'])->name('moves.bulk-post');
+
+        Route::get('reports',                       [AccReportController::class, 'index'])->name('reports.index');
+        Route::get('reports/{type}',                [AccReportController::class, 'show'])
+            ->where('type', 'trial-balance|general-ledger|income-statement|balance-sheet|cash-flow|aged-receivable')
+            ->name('reports.show');
+    });
+
     /* ==================== SALES ==================== */
     Route::prefix('sales')->as('sales.')->group(function () {
 
@@ -84,15 +121,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('{id}',     [ProductController::class, 'show'])->whereNumber('id')->name('show');
             Route::match(['put', 'patch'], '{id}', [ProductController::class, 'update'])->whereNumber('id')->name('update');
             Route::delete('{id}',  [ProductController::class, 'destroy'])->whereNumber('id')->name('destroy');
-        });
-
-        /* Pricelists */
-        Route::prefix('pricelists')->as('pricelists.')->group(function () {
-            Route::get('/',        [PricelistController::class, 'index'])->name('index');
-            Route::post('/',       [PricelistController::class, 'store'])->name('store');
-            Route::get('{id}',     [PricelistController::class, 'show'])->whereNumber('id')->name('show');
-            Route::match(['put', 'patch'], '{id}', [PricelistController::class, 'update'])->whereNumber('id')->name('update');
-            Route::delete('{id}',  [PricelistController::class, 'destroy'])->whereNumber('id')->name('destroy');
         });
 
         /* Quotations */
@@ -124,6 +152,8 @@ Route::middleware('auth:sanctum')->group(function () {
             })->whereNumber('id')->name('logs.by-quotation');
         });
 
+        Route::apiResource('pricelists', PricelistController::class);
+
         /* Quotation Items (generic) */
         Route::prefix('quotation-items')->as('quotation-items.')->group(function () {
             Route::get('/',        [QuotationItemController::class, 'index'])->name('index');
@@ -144,7 +174,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/',                 [SalesOrderController::class, 'index'])->name('index');
             Route::get('{id}',              [SalesOrderController::class, 'show'])->whereNumber('id')->name('show');
             Route::post('/',                [SalesOrderController::class, 'store'])->name('store');
-            Route::match(['put', 'patch'],   '{id}', [SalesOrderController::class, 'update'])->whereNumber('id')->name('update');
+            Route::match(['put', 'patch'], '{id}', [SalesOrderController::class, 'update'])->whereNumber('id')->name('update');
             Route::delete('{id}',           [SalesOrderController::class, 'destroy'])->whereNumber('id')->name('destroy');
 
             Route::post('{id}/invoice',     [SalesOrderController::class, 'makeInvoice'])->whereNumber('id')->name('invoice.create');
@@ -163,13 +193,12 @@ Route::middleware('auth:sanctum')->group(function () {
     /* ==================== SCM ==================== */
     Route::prefix('scm')->as('scm.')->group(function () {
 
-        /* ---------- Inventory (custom endpoints dulu supaya tidak konflik show) ---------- */
+        /* Inventory (custom endpoints agar tidak konflik show) */
         Route::prefix('inventory')->as('inventory.')->group(function () {
-            // Read
             Route::get('stocks',        [InventoryController::class, 'stocks'])->name('stocks');
             Route::get('lots',          [InventoryController::class, 'lots'])->name('lots');
             Route::get('expiry-alerts', [InventoryController::class, 'expiryAlerts'])->name('expiry-alerts');
-            // Write / Actions
+
             Route::post('lots',     [InventoryController::class, 'storeLot'])->name('lots.store');
             Route::post('receipt',  [InventoryController::class, 'receipt'])->name('receipt');
             Route::post('transfer', [InventoryController::class, 'transfer'])->name('transfer');
@@ -177,17 +206,17 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         Route::apiResource('inventory', InventoryController::class)->except(['show']);
 
-        /* ---------- Logistics ---------- */
+        /* Logistics */
         Route::post('logistics/{id}/confirm', [LogisticsController::class, 'confirm'])->whereNumber('id')->name('logistics.confirm');
         Route::post('logistics/{id}/pod',     [LogisticsController::class, 'proofOfDelivery'])->whereNumber('id')->name('logistics.pod');
         Route::apiResource('logistics', LogisticsController::class);
 
-        /* ---------- Purchases ---------- */
+        /* Purchases */
         Route::post('purchases/{id}/confirm', [PurchaseController::class, 'confirm'])->whereNumber('id')->name('purchases.confirm');
         Route::post('purchases/{id}/receive', [PurchaseController::class, 'receive'])->whereNumber('id')->name('purchases.receive');
         Route::apiResource('purchases', PurchaseController::class);
 
-        /* ---------- Replenishments ---------- */
+        /* Replenishments */
         Route::post('replenishments/check',         [ReplenishmentController::class, 'check'])->name('replenishments.check');
         Route::post('replenishments/auto-generate', [ReplenishmentController::class, 'autoGenerate'])->name('replenishments.auto-generate');
         Route::apiResource('replenishments', ReplenishmentController::class);
@@ -211,7 +240,7 @@ Route::middleware('auth:sanctum')->group(function () {
             return $q->orderBy('name')->limit(50)->get();
         })->name('warehouses.lookup');
 
-        /* ---------- Quality ---------- */
+        /* Quality */
         Route::prefix('quality')->as('quality.')->group(function () {
             Route::get('checkpoints',     [QualityController::class, 'checkpoints'])->name('checkpoints');
             Route::get('checks',          [QualityController::class, 'index'])->name('checks.index');
@@ -220,7 +249,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('reports',         [QualityController::class, 'reports'])->name('reports');
         });
 
-        /* ---------- Processing ---------- */
+        /* Processing */
         Route::prefix('processing')->as('processing.')->group(function () {
             Route::get('workorders',              [ProcessingController::class, 'index'])->name('workorders.index');
             Route::get('workorders/{id}',         [ProcessingController::class, 'show'])->whereNumber('id')->name('workorders.show');
@@ -229,31 +258,23 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('workorders/{id}/finish', [ProcessingController::class, 'finish'])->whereNumber('id')->name('workorders.finish');
         });
 
-        /* ---------- Maintenance ---------- */
+        /* Maintenance */
         Route::prefix('maintenance')->as('maintenance.')->group(function () {
-            // Equipments
             Route::get('equipments',  [MaintenanceController::class, 'equipments'])->name('equipments');
             Route::post('equipments', [MaintenanceController::class, 'storeEquipment'])->name('equipments.store');
 
-            // Preventive plans (opsional)
             Route::get('plans', [MaintenanceController::class, 'plans'])->name('plans');
 
-            // Requests / Corrective
             Route::get('requests',       [MaintenanceController::class, 'index'])->name('requests.index');
             Route::post('request',       [MaintenanceController::class, 'request'])->name('request');
             Route::post('complete/{id}', [MaintenanceController::class, 'complete'])->whereNumber('id')->name('complete');
         });
 
-        /* ---------- Reports (read-only) ---------- */
-        // Daftar tipe yang valid: stock-summary, stock-movement, valuation, aging, expiry
-        Route::get('reports', [ScmReportController::class, 'index'])
-            ->name('reports.index');
-
+        /* Reports (read-only) */
+        Route::get('reports', [ScmReportController::class, 'index'])->name('reports.index');
         Route::get('reports/{type}', [ScmReportController::class, 'show'])
             ->where('type', 'stock-summary|stock-movement|valuation|aging|expiry')
             ->name('reports.show');
-        Route::get('reports',        [ScmReportController::class, 'index'])->name('scm.reports.index');
-        Route::get('reports/{key}',  [ScmReportController::class, 'show'])->name('scm.reports.show');
     });
 
     /* ==================== HR ==================== */
@@ -269,13 +290,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('leaves/{id}/approve', [LeaveController::class, 'approve'])->whereNumber('id')->name('leaves.approve');
 
         Route::apiResource('shifts',      ShiftController::class);
+
         Route::get('attendances',         [AttendanceController::class, 'index'])->name('attendances.index');
         Route::post('attendances',        [AttendanceController::class, 'store'])->name('attendances.store');
         Route::get('attendances/{id}',    [AttendanceController::class, 'show'])->whereNumber('id')->name('attendances.show');
         Route::match(['put', 'patch'], 'attendances/{id}', [AttendanceController::class, 'update'])->whereNumber('id')->name('attendances.update');
         Route::delete('attendances/{id}', [AttendanceController::class, 'destroy'])->whereNumber('id')->name('attendances.destroy');
+
+        // Generic checkin/checkout (admin/HR)
         Route::post('attendances/checkin',  [AttendanceController::class, 'checkIn'])->name('attendances.checkin');
         Route::post('attendances/checkout', [AttendanceController::class, 'checkOut'])->name('attendances.checkout');
+
+        // ✨ Tambahan opsional untuk admin/HR (tidak mengganti yang lama)
+        Route::get('attendances/open', [AttendanceController::class, 'open'])->name('attendances.open');
 
         Route::apiResource('contracts',   ContractController::class);
         Route::apiResource('salary-structures', SalaryStructureController::class);

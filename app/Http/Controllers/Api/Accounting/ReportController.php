@@ -11,6 +11,56 @@ use Illuminate\Http\JsonResponse;
 class ReportController extends Controller
 {
     /**
+     * GET /api/accounting/reports
+     * Daftar report yang tersedia.
+     */
+    public function index(): JsonResponse
+    {
+        return response()->json([
+            'available' => [
+                'trial-balance'   => 'Trial Balance',
+                'general-ledger'  => 'General Ledger',
+                // sisanya opsional: implement kapan-kapan
+                'income-statement'=> 'Income Statement (coming soon)',
+                'balance-sheet'   => 'Balance Sheet (coming soon)',
+                'cash-flow'       => 'Cash Flow (coming soon)',
+                'aged-receivable' => 'Aged Receivable (coming soon)',
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/accounting/reports/{type}
+     * Router kecil yang meneruskan ke method masing-masing report.
+     */
+    public function show(string $type, Request $r): JsonResponse
+    {
+        $type = strtolower($type);
+
+        return match ($type) {
+            'trial-balance'  => $this->trialBalance($r),
+            'general-ledger' => $this->generalLedger($r),
+
+            // --------- placeholder untuk report lain ----------
+            'income-statement' => response()->json([
+                'message' => 'Income Statement belum diimplementasi.'
+            ], 501),
+            'balance-sheet' => response()->json([
+                'message' => 'Balance Sheet belum diimplementasi.'
+            ], 501),
+            'cash-flow' => response()->json([
+                'message' => 'Cash Flow belum diimplementasi.'
+            ], 501),
+            'aged-receivable' => response()->json([
+                'message' => 'Aged Receivable belum diimplementasi.'
+            ], 501),
+            // --------------------------------------------------
+
+            default => response()->json(['message' => 'Unknown report type.'], 404),
+        };
+    }
+
+    /**
      * GET /api/accounting/reports/trial-balance?company_id=&date_from=&date_to=
      */
     public function trialBalance(Request $r): JsonResponse
@@ -79,14 +129,13 @@ class ReportController extends Controller
         $withOb    = (bool) $r->boolean('include_opening', false);
         $perPage   = (int) ($r->get('per_page', 0)); // 0 = non-paginated
 
-        // Jika company_id diberikan, pastikan account milik company tsb (opsional; hapus jika multi-company bebas)
         if ($companyId && (int)$account->company_id !== (int)$companyId) {
             return response()->json([
                 'message' => 'Account does not belong to the specified company.'
             ], 422);
         }
 
-        // Hitung saldo awal (sebelum date_from) bila diminta
+        // opening balance (sebelum date_from)
         $opening = 0.0;
         if ($withOb && $from) {
             $ob = MoveLine::query()
@@ -102,7 +151,7 @@ class ReportController extends Controller
             $opening = (float) ($ob->d ?? 0) - (float) ($ob->c ?? 0);
         }
 
-        // Query dasar GL
+        // query dasar GL
         $base = MoveLine::query()
             ->where('account_id', $account->id)
             ->whereHas('move', function ($q) use ($companyId, $from, $to) {
@@ -115,7 +164,6 @@ class ReportController extends Controller
             ->orderByRaw('move_id asc, id asc');
 
         if ($perPage > 0) {
-            // Paginated
             $p = $base->paginate($perPage)->through(function ($l) {
                 return [
                     'date'   => optional($l->move?->date)->toDateString(),
@@ -148,7 +196,7 @@ class ReportController extends Controller
             ]);
         }
 
-        // Non-paginated
+        // non-paginated
         $rows = $base->get()->map(function ($l) {
             return [
                 'date'   => optional($l->move?->date)->toDateString(),
