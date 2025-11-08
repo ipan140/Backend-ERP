@@ -5,59 +5,81 @@ namespace App\Http\Controllers\Api\Accounting;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AccountController extends Controller
 {
     public function index(Request $r)
     {
         $q = Account::query()
-            ->when($r->filled('company_id'), fn($qq)=>$qq->where('company_id',$r->company_id))
-            ->when($r->filled('search'), fn($qq)=>$qq->where(fn($w)=>
-                $w->where('code','like','%'.$r->search.'%')
-                  ->orWhere('name','like','%'.$r->search.'%')))
-            ->when($r->filled('type'), fn($qq)=>$qq->where('type',$r->type))
+            ->with('parent:id,code,name')
+            ->when($r->filled('company_id'), fn($qq) => $qq->where('company_id', $r->company_id))
+            ->when($r->filled('search'), function ($qq) use ($r) {
+                $s = trim((string)$r->search);
+                $qq->where(function ($w) use ($s) {
+                    $w->where('code','like',"%{$s}%")
+                      ->orWhere('name','like',"%{$s}%");
+                });
+            })
+            ->when($r->filled('type'), fn($qq) => $qq->where('type', $r->type))
+            ->when($r->filled('active'), fn($qq) => $qq->where('active', (bool)$r->active))
             ->orderBy('code');
 
-        return $q->paginate((int)$r->get('per_page',15));
+        $perPage = (int) $r->get('per_page', 15);
+        return $q->paginate($perPage);
     }
 
     public function store(Request $r)
     {
         $data = $r->validate([
-            'company_id' => 'required|exists:companies,id',
-            'code'       => 'required|string|max:20',
-            'name'       => 'required|string|max:120',
-            'type'       => 'required|in:asset,liability,equity,revenue,expense',
-            'parent_id'  => 'nullable|exists:accounts,id',
-            'active'     => 'boolean',
+            'company_id' => ['required','exists:companies,id'],
+            'code'       => [
+                'required','string','max:20',
+                Rule::unique('accounts')->where(fn($q)=>$q->where('company_id',$r->company_id)),
+            ],
+            'name'       => ['required','string','max:150'],
+            'type'       => ['required', Rule::in(['asset','liability','equity','revenue','expense'])],
+            'parent_id'  => ['nullable','exists:accounts,id'],
+            'active'     => ['boolean'],
+            'reconcile'  => ['boolean'],
         ]);
-        $data['level'] = $data['parent_id'] ? (Account::find($data['parent_id'])->level + 1) : 1;
 
-        return Account::create($data);
+        $acc = Account::create($data);
+        return $acc->load('parent:id,code,name');
     }
 
-    public function show(Account $account) { return $account; }
+    public function show(Account $account)
+    {
+        return $account->load('parent:id,code,name');
+    }
 
     public function update(Request $r, Account $account)
     {
         $data = $r->validate([
-            'code'       => 'sometimes|string|max:20',
-            'name'       => 'sometimes|string|max:120',
-            'type'       => 'sometimes|in:asset,liability,equity,revenue,expense',
-            'parent_id'  => 'nullable|exists:accounts,id',
-            'active'     => 'sometimes|boolean',
+            'company_id' => ['sometimes','required','exists:companies,id'],
+            'code'       => [
+                'sometimes','required','string','max:20',
+                Rule::unique('accounts')
+                    ->ignore($account->id)
+                    ->where(fn($q)=>$q->where('company_id', $r->get('company_id', $account->company_id))),
+            ],
+            'name'       => ['sometimes','required','string','max:150'],
+            'type'       => ['sometimes', Rule::in(['asset','liability','equity','revenue','expense'])],
+            'parent_id'  => ['nullable','different:id','exists:accounts,id'],
+            'active'     => ['sometimes','boolean'],
+            'reconcile'  => ['sometimes','boolean'],
         ]);
-        if (array_key_exists('parent_id',$data)) {
-            $data['level'] = $data['parent_id'] ? (Account::find($data['parent_id'])->level + 1) : 1;
-        }
+
         $account->update($data);
-        return $account;
+        return $account->load('parent:id,code,name');
     }
 
     public function destroy(Account $account)
     {
-        abort_if($account->children()->exists(), 422, 'Account has children.');
-        abort_if($account->moveLines()->exists(), 422, 'Account used in journal lines.');
+        // optional guard: tolak hapus jika sudah dipakai di move lines
+        if ($account->lines()->exists()) {
+            return response()->json(['message' => 'Account already used.'], 422);
+        }
         $account->delete();
         return response()->noContent();
     }
