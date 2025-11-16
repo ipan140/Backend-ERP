@@ -9,22 +9,32 @@ class Equipment extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['asset_id','name','serial','category','active'];
+    protected $table = 'equipment'; // ← PERBAIKAN PENTING
 
-    protected $casts = ['active' => 'boolean'];
+    protected $fillable = [
+        'asset_id',
+        'name',
+        'serial',
+        'category',
+        'active'
+    ];
+
+    protected $casts = [
+        'active' => 'boolean',
+    ];
 
     public function asset()
     {
-        return $this->belongsTo(Asset::class);
+        return $this->belongsTo(Asset::class, 'asset_id');
     }
 
     public function plans()
     {
-        return $this->hasMany(MaintenancePlan::class);
+        return $this->hasMany(MaintenancePlan::class, 'equipment_id');
     }
 
     public function requests()
     {
-        return $this->hasMany(MaintenanceRequest::class);
+        return $this->hasMany(MaintenanceRequest::class, 'equipment_id');
     }
 }

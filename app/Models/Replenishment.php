@@ -9,13 +9,10 @@ class Replenishment extends Model
 {
     use HasFactory;
 
-    /**
-     * Nama tabel (opsional, tapi bagus untuk eksplisit).
-     */
     protected $table = 'replenishments';
 
     /**
-     * Kolom yang bisa diisi melalui mass assignment.
+     * Kolom yang boleh diisi secara mass assignment.
      */
     protected $fillable = [
         'item_id',
@@ -27,7 +24,7 @@ class Replenishment extends Model
     ];
 
     /**
-     * Nilai default.
+     * Default attribute values.
      */
     protected $attributes = [
         'min_qty'     => 0,
@@ -37,7 +34,7 @@ class Replenishment extends Model
     ];
 
     /**
-     * Type casting.
+     * Attribute casting.
      */
     protected $casts = [
         'min_qty'     => 'decimal:6',
@@ -46,41 +43,41 @@ class Replenishment extends Model
         'active'      => 'boolean',
     ];
 
-    /* --------------------------
+    /* ---------------------------------------------
      |  Relationships
-     |--------------------------- */
+     |--------------------------------------------- */
 
     /**
-     * Barang yang diatur oleh aturan replenishment.
+     * Relasi ke item.
      */
     public function item()
     {
-        return $this->belongsTo('App\Models\Item', 'item_id');
+        return $this->belongsTo(Item::class, 'item_id');
     }
 
     /**
-     * Gudang tempat barang disimpan.
+     * Relasi ke warehouse.
      */
     public function warehouse()
     {
-        return $this->belongsTo('App\Models\Warehouse', 'warehouse_id');
+        return $this->belongsTo(Warehouse::class, 'warehouse_id');
     }
 
     /**
-     * Level stok terkini (optional, join ke stock_levels).
+     * Relasi ke stock level sesuai item & warehouse.
      */
     public function stockLevel()
     {
-        return $this->hasOne('App\Models\StockLevel', 'item_id', 'item_id')
+        return $this->hasOne(StockLevel::class, 'item_id', 'item_id')
             ->whereColumn('warehouse_id', 'replenishments.warehouse_id');
     }
 
-    /* --------------------------
-     |  Scopes
-     |--------------------------- */
+    /* ---------------------------------------------
+     |  Query Scopes
+     |--------------------------------------------- */
 
     /**
-     * Ambil hanya rule yang aktif.
+     * Scope rule aktif.
      */
     public function scopeActive($q)
     {
@@ -88,7 +85,7 @@ class Replenishment extends Model
     }
 
     /**
-     * Ambil rule berdasarkan item dan warehouse tertentu.
+     * Scope rule untuk item & warehouse tertentu.
      */
     public function scopeFor($q, $itemId, $warehouseId)
     {
@@ -97,10 +94,15 @@ class Replenishment extends Model
     }
 
     /**
-     * Ambil rule yang butuh reorder (stok di bawah min).
+     * Scope rule yang membutuhkan pengisian ulang.
+     * 
+     * Logika yang benar:
+     * - reorder diperlukan jika stok < min_qty
      */
     public function scopeNeedsReorder($q)
     {
-        return $q->whereColumn('min_qty', '>', 'reorder_qty');
+        return $q->whereHas('stockLevel', function ($q) {
+            $q->whereColumn('qty', '<', 'replenishments.min_qty');
+        });
     }
 }
