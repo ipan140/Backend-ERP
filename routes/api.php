@@ -27,6 +27,8 @@ use App\Http\Controllers\Api\SCM\QualityController;
 use App\Http\Controllers\Api\SCM\ReplenishmentController;
 use App\Http\Controllers\Api\SCM\ReportController as ScmReportController;
 use App\Http\Controllers\Api\SCM\VendorController;
+use App\Http\Controllers\Api\SCM\ItemsController;
+use App\Http\Controllers\Api\SCM\WarehousesController;
 
 /* ===== HR ===== */
 use App\Http\Controllers\Api\HR\DepartmentController;
@@ -193,6 +195,8 @@ Route::middleware('auth:sanctum')->group(function () {
     /* ==================== SCM ==================== */
     Route::prefix('scm')->as('scm.')->group(function () {
 
+        Route::apiResource('vendors', VendorController::class);
+
         /* Inventory (custom endpoints agar tidak konflik show) */
         Route::prefix('inventory')->as('inventory.')->group(function () {
             Route::get('stocks',        [InventoryController::class, 'stocks'])->name('stocks');
@@ -219,9 +223,16 @@ Route::middleware('auth:sanctum')->group(function () {
         /* Replenishments */
         Route::post('replenishments/check',         [ReplenishmentController::class, 'check'])->name('replenishments.check');
         Route::post('replenishments/auto-generate', [ReplenishmentController::class, 'autoGenerate'])->name('replenishments.auto-generate');
+
+        /* ✨ DROPDOWN KHUSUS REPLENISHMENT (INI YANG DITAMBAHKAN) */
+        Route::get('replenishments/items',        [\App\Http\Controllers\Api\SCM\ReplenishmentController::class, 'items']);
+        Route::get('replenishments/warehouses',   [\App\Http\Controllers\Api\SCM\ReplenishmentController::class, 'warehouses']);
+        Route::get('replenishments/form-data',    [\App\Http\Controllers\Api\SCM\ReplenishmentController::class, 'formData']);
+
+        /* Resource utama */
         Route::apiResource('replenishments', ReplenishmentController::class);
 
-        /* ✨ Lookup endpoints (dropdown) */
+        /* ✨ Lookup endpoints (global lookup) */
         Route::get('items', function (Request $r) {
             $q = Item::query()->select('id', 'name');
             if ($r->filled('search')) {
@@ -260,22 +271,88 @@ Route::middleware('auth:sanctum')->group(function () {
 
         /* Maintenance */
         Route::prefix('maintenance')->as('maintenance.')->group(function () {
-            Route::get('equipments',  [MaintenanceController::class, 'equipments'])->name('equipments');
-            Route::post('equipments', [MaintenanceController::class, 'storeEquipment'])->name('equipments.store');
 
-            Route::get('plans', [MaintenanceController::class, 'plans'])->name('plans');
+            /* =========================
+     * EQUIPMENTS
+     * ========================= */
+            Route::get('equipments',  [MaintenanceController::class, 'equipments'])
+                ->name('equipments');
 
-            Route::get('requests',       [MaintenanceController::class, 'index'])->name('requests.index');
-            Route::post('request',       [MaintenanceController::class, 'request'])->name('request');
-            Route::post('complete/{id}', [MaintenanceController::class, 'complete'])->whereNumber('id')->name('complete');
+            Route::post('equipments', [MaintenanceController::class, 'storeEquipment'])
+                ->name('equipments.store');
+
+            // NEW → UPDATE EQUIPMENT
+            Route::put('equipments/{id}', [MaintenanceController::class, 'updateEquipment'])
+                ->whereNumber('id')
+                ->name('equipments.update');
+
+            // NEW → DELETE EQUIPMENT
+            Route::delete('equipments/{id}', [MaintenanceController::class, 'destroyEquipment'])
+                ->whereNumber('id')
+                ->name('equipments.destroy');
+
+
+            /* =========================
+     * MAINTENANCE PLANS
+     * ========================= */
+            Route::get('plans', [MaintenanceController::class, 'plans'])
+                ->name('plans');
+
+            Route::post('plans', [MaintenanceController::class, 'storePlan'])
+                ->name('plans.store');
+
+            Route::get('plans/{id}', [MaintenanceController::class, 'showPlan'])
+                ->whereNumber('id')
+                ->name('plans.show');
+
+            Route::put('plans/{id}', [MaintenanceController::class, 'updatePlan'])
+                ->whereNumber('id')
+                ->name('plans.update');
+
+            Route::delete('plans/{id}', [MaintenanceController::class, 'destroyPlan'])
+                ->whereNumber('id')
+                ->name('plans.destroy');
+
+
+            /* =========================
+     * MAINTENANCE REQUESTS
+     * ========================= */
+            Route::get('requests', [MaintenanceController::class, 'index'])
+                ->name('requests.index');
+
+            Route::post('requests', [MaintenanceController::class, 'storeRequest'])
+                ->name('requests.store');
+
+            Route::post('request', [MaintenanceController::class, 'storeRequest'])
+                ->name('request.single');
+
+            Route::get('requests/{id}', [MaintenanceController::class, 'showRequest'])
+                ->whereNumber('id')
+                ->name('requests.show');
+
+            Route::put('requests/{id}', [MaintenanceController::class, 'updateRequest'])
+                ->whereNumber('id')
+                ->name('requests.update');
+
+            Route::delete('requests/{id}', [MaintenanceController::class, 'destroyRequest'])
+                ->whereNumber('id')
+                ->name('requests.destroy');
+
+            Route::post('requests/{id}/complete', [MaintenanceController::class, 'complete'])
+                ->whereNumber('id')
+                ->name('requests.complete');
+
+            Route::post('complete/{id}', [MaintenanceController::class, 'complete'])
+                ->whereNumber('id');
         });
 
-        /* Reports (read-only) */
+        /* Reports */
         Route::get('reports', [ScmReportController::class, 'index'])->name('reports.index');
         Route::get('reports/{type}', [ScmReportController::class, 'show'])
             ->where('type', 'stock-summary|stock-movement|valuation|aging|expiry')
             ->name('reports.show');
     });
+
 
     /* ==================== HR ==================== */
     Route::prefix('hr')->as('hr.')->group(function () {

@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\SCM;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\{Equipment, MaintenanceRequest};
+use App\Models\{Equipment, MaintenanceRequest, MaintenancePlan};
 
 class MaintenanceController extends Controller
 {
@@ -12,7 +12,6 @@ class MaintenanceController extends Controller
      * EQUIPMENTS
      * ========================= */
 
-    // List equipments (support search & paginate ringan)
     public function equipments(Request $r)
     {
         $q = Equipment::query()
@@ -20,25 +19,22 @@ class MaintenanceController extends Controller
                 $s = "%{$r->search}%";
                 $qq->where(function ($w) use ($s) {
                     $w->where('name', 'like', $s)
-                      ->orWhere('code', 'like', $s)
-                      ->orWhere('serial', 'like', $s)
-                      ->orWhere('category', 'like', $s);
+                        ->orWhere('serial', 'like', $s)
+                        ->orWhere('category', 'like', $s);
                 });
             })
             ->orderBy('name');
 
-        $perPage = (int) $r->get('per_page', 20);
-        $rows    = $q->paginate($perPage);
-
-        return response()->json(['ok' => true, 'data' => $rows]);
+        return response()->json([
+            'ok'   => true,
+            'data' => $q->paginate($r->get('per_page', 20))
+        ]);
     }
 
-    // Create equipment
     public function storeEquipment(Request $r)
     {
         $data = $r->validate([
             'name'     => 'required|string|max:200',
-            'code'     => 'required|string|max:100|unique:equipments,code',
             'serial'   => 'nullable|string|max:200',
             'category' => 'nullable|string|max:200',
             'asset_id' => 'nullable|integer|exists:assets,id',
@@ -50,54 +46,162 @@ class MaintenanceController extends Controller
         return response()->json(['ok' => true, 'equipment' => $eq], 201);
     }
 
+    public function showEquipment($id)
+    {
+        return response()->json([
+            'ok' => true,
+            'equipment' => Equipment::findOrFail($id)
+        ]);
+    }
+
+    public function updateEquipment(Request $r, $id)
+    {
+        $eq = Equipment::findOrFail($id);
+
+        $data = $r->validate([
+            'name'     => 'required|string|max:200',
+            'serial'   => 'nullable|string|max:200',
+            'category' => 'nullable|string|max:200',
+            'asset_id' => 'nullable|integer|exists:assets,id',
+            'active'   => 'nullable|boolean',
+        ]);
+
+        $eq->update($data);
+
+        return response()->json(['ok' => true, 'equipment' => $eq]);
+    }
+
+    public function destroyEquipment($id)
+    {
+        Equipment::findOrFail($id)->delete();
+        return response()->json(['ok' => true, 'message' => 'Equipment deleted']);
+    }
+
+
     /* =========================
-     * PREVENTIVE PLANS (optional)
+     * PREVENTIVE PLANS
      * ========================= */
+
     public function plans()
     {
-        // Bila belum ada tabel/Model MaintenancePlan, kirim array kosong agar FE aman.
-        // return response()->json(['ok'=>true,'plans'=>MaintenancePlan::with('equipment')->latest()->paginate(20)]);
-        return response()->json(['ok' => true, 'plans' => []]);
+        return response()->json([
+            'ok'    => true,
+            'plans' => MaintenancePlan::with('equipment')
+                ->latest()
+                ->paginate(20)
+        ]);
     }
+
+    public function storePlan(Request $r)
+    {
+        $data = $r->validate([
+            'equipment_id' => 'required|exists:equipment,id',
+            'frequency'    => 'required|string',
+            'next_date'    => 'required|date',
+            'procedure'    => 'nullable|string',
+        ]);
+
+        $plan = MaintenancePlan::create($data);
+
+        return response()->json([
+            'ok'   => true,
+            'plan' => $plan->load('equipment')
+        ], 201);
+    }
+
+    public function showPlan($id)
+    {
+        return response()->json([
+            'ok'   => true,
+            'plan' => MaintenancePlan::with('equipment')->findOrFail($id)
+        ]);
+    }
+
+    public function updatePlan(Request $r, $id)
+    {
+        $plan = MaintenancePlan::findOrFail($id);
+
+        $data = $r->validate([
+            'equipment_id' => 'required|exists:equipment,id',
+            'frequency'    => 'required|string',
+            'next_date'    => 'required|date',
+            'procedure'    => 'nullable|string'
+        ]);
+
+        $plan->update($data);
+
+        return response()->json(['ok' => true, 'plan' => $plan]);
+    }
+
+    public function destroyPlan($id)
+    {
+        MaintenancePlan::findOrFail($id)->delete();
+        return response()->json(['ok' => true, 'message' => 'Plan deleted']);
+    }
+
 
     /* =========================
      * MAINTENANCE REQUESTS
      * ========================= */
 
-    // List requests
     public function index(Request $r)
     {
         $q = MaintenanceRequest::with('equipment')
             ->when($r->filled('status'), fn($qq) => $qq->where('status', $r->status))
             ->when($r->filled('type'),   fn($qq) => $qq->where('type', $r->type))
-            ->orderByDesc('id');
-
-        $perPage = (int) $r->get('per_page', 15);
+            ->latest();
 
         return response()->json([
             'ok'       => true,
-            'requests' => $q->paginate($perPage),
+            'requests' => $q->paginate($r->get('per_page', 15)),
         ]);
     }
 
-    // Create request (corrective / preventive)
-    public function request(Request $r)
+    public function storeRequest(Request $r)
     {
         $data = $r->validate([
-            'equipment_id' => 'required|integer|exists:equipments,id',
-            'type'         => 'required|string|in:corrective,preventive',
+            'equipment_id' => 'required|integer|exists:equipment,id',
+            'type'         => 'required|in:corrective,preventive',
             'note'         => 'nullable|string',
             'priority'     => 'nullable|in:low,normal,high',
         ]);
 
-        $mr = MaintenanceRequest::create($data + [
-            'status'       => 'open',
-        ]);
+        $mr = MaintenanceRequest::create($data + ['status' => 'open']);
 
         return response()->json(['ok' => true, 'request' => $mr->load('equipment')], 201);
     }
 
-    // Complete a request
+    public function showRequest($id)
+    {
+        return response()->json([
+            'ok'      => true,
+            'request' => MaintenanceRequest::with('equipment')->findOrFail($id)
+        ]);
+    }
+
+    public function updateRequest(Request $r, $id)
+    {
+        $mr = MaintenanceRequest::findOrFail($id);
+
+        $data = $r->validate([
+            'equipment_id' => 'required|exists:equipment,id',
+            'type'         => 'required|in:corrective,preventive',
+            'note'         => 'nullable|string',
+            'priority'     => 'nullable|in:low,normal,high',
+            'status'       => 'nullable|in:open,progress,done',
+        ]);
+
+        $mr->update($data);
+
+        return response()->json(['ok' => true, 'request' => $mr]);
+    }
+
+    public function destroyRequest($id)
+    {
+        MaintenanceRequest::findOrFail($id)->delete();
+        return response()->json(['ok' => true, 'message' => 'Request deleted']);
+    }
+
     public function complete($id)
     {
         $mr = MaintenanceRequest::findOrFail($id);
